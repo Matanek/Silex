@@ -6,10 +6,6 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
-## [Unreleased]
-
-- Corriger l’inférence des appels génériques dans les boucles `indexed()` : l’élément conserve son type de collection et l’indice son type `int`, y compris dans les boucles imbriquées. Les modes d’emprunt et de copie restent inchangés.
-
 ## [0.48.0] - 2026-11-08
 
 ### Pourquoi mettre à jour ?
@@ -23,6 +19,8 @@ leurs propres nouveautés et versions ; elles ne sont pas incluses dans le binai
 du compilateur.
 
 ### Changements
+
+- Corriger l’inférence des appels génériques dans les boucles `indexed()` : l’élément conserve son type de collection et l’indice son type `int`, y compris dans les boucles imbriquées. Les modes d’emprunt et de copie restent inchangés.
 
 - Le compilateur prouve le confinement des captures dans une racine sans entrée ni retour de valeur, lorsque les liaisons expirent sans valeur encore vivante et qu’aucun global, import opaque ou destinataire natif ne peut transporter le prêt. Les autres cas conservent l’analyse de propriété complète. Les contextes récursifs distinguent les receveurs préexistants, les locaux adressés sans alias extérieur restent privés à l’appel, et les collections connues conservent leurs éléments et leur comptage de ressources. Les drapeaux de contrôle concrets et le zéro numérique typé écartent les chemins prouvés impossibles ; les appels opaques, appels natifs et écritures brutes invalident leurs faits mutables. Le code émis et le contrat des captures restent inchangés.
 

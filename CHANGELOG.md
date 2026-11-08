@@ -6,10 +6,6 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
-## [Unreleased]
-
-- Fix generic call inference inside `indexed()` loops: elements retain their collection type and indices retain `int`, including in nested loops. Borrowing and copying modes remain unchanged.
-
 ## [0.48.0] - 2026-11-08
 
 ### Why upgrade?
@@ -21,6 +17,8 @@ compilation work for large applications. Ecosystem packages publish their own
 features and versions; these are not included in the compiler binary.
 
 ### Changes
+
+- Fix generic call inference inside `indexed()` loops: elements retain their collection type and indices retain `int`, including in nested loops. Borrowing and copying modes remain unchanged.
 
 - The compiler proves capture confinement in an input-free void root when bindings expire without surviving values and no global, opaque import, or native recipient can carry the loan. Other cases retain the complete ownership analysis. Recursive contexts distinguish pre-existing receivers, addressed locals with no outside aliases remain invocation-private, and known collections retain their elements and resource counts. Concrete control flags and typed numeric zero exclude proven impossible paths; opaque calls, native calls, and raw stores invalidate mutable facts. Emitted code and the capture contract remain unchanged.
 
