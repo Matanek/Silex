@@ -6,7 +6,17 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
-## [Unreleased]
+## [0.48.0] - 2026-11-08
+
+### Why upgrade?
+
+This release introduces one implementation per `Result` operation, default
+protocol methods, and explicitly rounded floating-point conversions. It fixes
+callback, collection, and composed native-program behavior while reducing
+compilation work for large applications. Ecosystem packages publish their own
+features and versions; these are not included in the compiler binary.
+
+### Changes
 
 - The compiler proves capture confinement in an input-free void root when bindings expire without surviving values and no global, opaque import, or native recipient can carry the loan. Other cases retain the complete ownership analysis. Recursive contexts distinguish pre-existing receivers, addressed locals with no outside aliases remain invocation-private, and known collections retain their elements and resource counts. Concrete control flags and typed numeric zero exclude proven impossible paths; opaque calls, native calls, and raw stores invalidate mutable facts. Emitted code and the capture contract remain unchanged.
 
@@ -149,7 +159,7 @@ This editorial history starts with version 0.44.1.
 - Fix `interpret` to accept `list.insert(list.count(), value)`, including
   empty lists, while retaining strict read and removal bounds.
 
-- Static methods now propagate `try` using their declared `Result` return, including void results and error messages; local alternatives remain available.
+- Static methods preserve value and void results, local alternatives, and error messages when explicitly captured with `try`.
 - `interpret` ignores imported system functions unreachable from `main`.
   Effective calls and callbacks that may reach an unsupported boundary remain
   rejected, allowing portable programs in modules that also offer file loading
@@ -159,7 +169,7 @@ This editorial history starts with version 0.44.1.
   A loaded private same-name function in another module no longer causes a
   false callback rejection; callers can retain their source function names.
 
-- `try`, including local alternatives and messages, preserves the logical `Result` and receiver state in mutating struct and class methods. Propagated failures now follow the receiver return path.
+- Explicit `try` capture and its local alternatives preserve the `Result` and receiver state in mutating structure and class methods, including error paths.
 
 - Visibility checks for a list shared across source atoms follow its element
   type in the declaring atom. An unrelated private type in the caller no
@@ -253,6 +263,25 @@ This editorial history starts with version 0.44.1.
 - The package method cache now tracks shaders, their included files, and embedded files. Editing or deleting any of these files invalidates the corresponding compiled constants; later compilations retain these dependencies, even after repeated cache hits.
 - Fixed a native Release crash when iterating a list in an enum whose other variant contains floating-point values. Floating-register inference now respects the boundary between shared enum storage and typed payloads; a standalone regression covers this case.
 - Fixed an incorrect normal in ARM64 Native Release when conditional copies made two still-live floating-point pairs share a SIMD register. Register coloring now keeps those pairs distinct while their lifetimes overlap; a 3D geometry regression checks both the normal and separation.
+
+### Impact and migration
+
+The meaning of `try` changes: an ordinary call to an operation returning
+`Result<T,E>` produces `T` or stops the program on failure. Write `try call()`
+to keep and inspect the `Result`; replace old implicit propagation with an
+explicit branch returning the error. Upgrade the compiler together with packages
+that adopt this contract.
+
+In an explicit constructor, initialize every class field on every path. To
+request prior construction, write an `=` initializer on the field. Callback
+borrows that may outlive their binding are rejected; keep an owned bound method
+when its receiver must survive. `round_float<T>` explicitly requests rounding;
+`as` remains lossless.
+
+Shared optimizations and changes specific to ARM64, X64, or LLVM are identified
+above. Quoted measurements qualify the named local macOS ARM64 workloads; they
+do not promise general speedups or performance parity across platforms.
+Distribution checks do not replace those measurement campaigns.
 
 ## [0.47.1] - 2026-09-25
 

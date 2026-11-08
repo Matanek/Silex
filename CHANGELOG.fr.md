@@ -6,7 +6,19 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
-## [Unreleased]
+## [0.48.0] - 2026-11-08
+
+### Pourquoi mettre à jour ?
+
+Cette version fait évoluer la gestion des erreurs avec une implémentation unique
+par opération `Result`, ajoute les méthodes de protocole par défaut et les
+conversions flottantes à arrondi explicite. Elle fiabilise les callbacks,
+les collections et les programmes natifs composés, tout en réduisant le travail
+de compilation des grandes applications. Les packages de l’écosystème publient
+leurs propres nouveautés et versions ; elles ne sont pas incluses dans le binaire
+du compilateur.
+
+### Changements
 
 - Le compilateur prouve le confinement des captures dans une racine sans entrée ni retour de valeur, lorsque les liaisons expirent sans valeur encore vivante et qu’aucun global, import opaque ou destinataire natif ne peut transporter le prêt. Les autres cas conservent l’analyse de propriété complète. Les contextes récursifs distinguent les receveurs préexistants, les locaux adressés sans alias extérieur restent privés à l’appel, et les collections connues conservent leurs éléments et leur comptage de ressources. Les drapeaux de contrôle concrets et le zéro numérique typé écartent les chemins prouvés impossibles ; les appels opaques, appels natifs et écritures brutes invalident leurs faits mutables. Le code émis et le contrat des captures restent inchangés.
 
@@ -149,7 +161,7 @@ Cet historique éditorial commence à la version 0.44.1.
 - Corriger `interpret` pour accepter `list.insert(list.count(), value)`,
   y compris sur une liste vide, sans élargir les bornes de lecture ou de retrait.
 
-- Les méthodes statiques propagent désormais `try` selon leur retour `Result`, y compris les résultats sans valeur et les messages d’erreur ; les alternatives locales restent disponibles.
+- Les méthodes statiques conservent les résultats avec ou sans valeur, les alternatives locales et les messages d’erreur lors d’une capture explicite par `try`.
 - `interpret` ignore les fonctions système importées qui ne sont pas atteignables
   depuis `main`. Les appels effectifs et callbacks pouvant atteindre une frontière
   non prise en charge restent refusés ; les programmes purement portables d’un
@@ -159,7 +171,7 @@ Cet historique éditorial commence à la version 0.44.1.
   module appelant. Une fonction homonyme privée chargée depuis un autre module
   ne provoque plus un faux refus de callback ; aucun nom source à contourner.
 
-- `try`, y compris ses alternatives locales et messages, conserve le retour `Result` et l’état du récepteur dans les méthodes modifiables de structures et classes. Les erreurs propagées ne contournent plus le retour du récepteur.
+- La capture `try` et ses alternatives locales conservent le retour `Result` et l’état du récepteur dans les méthodes modifiables de structures et classes, y compris sur les chemins d’erreur.
 
 - La vérification de visibilité d’une liste partagée entre atomes de source
   suit le type d’élément dans son atome déclarant. Un type privé sans rapport
@@ -262,6 +274,26 @@ Cet historique éditorial commence à la version 0.44.1.
 - Le cache des méthodes de packages suit désormais les shaders, leurs fichiers inclus et les fichiers embarqués. Modifier ou supprimer un de ces fichiers invalide les constantes compilées correspondantes ; les compilations suivantes conservent ces dépendances, même après plusieurs réutilisations du cache.
 - Correction d’un crash Release natif lors du parcours d’une liste dans un enum dont une autre variante contient des flottants. L’inférence des registres flottants respecte désormais la frontière entre le stockage partagé de l’enum et ses charges typées ; une régression autonome couvre ce cas.
 - Correction d’une normale erronée en Native Release ARM64 lorsque des copies conditionnelles faisaient partager un registre SIMD à deux paires flottantes encore vivantes. Le coloriage conserve ces paires distinctes tant que leurs durées de vie se recouvrent ; une régression de géométrie 3D contrôle la normale et la séparation.
+
+### Impact et migration
+
+La sémantique de `try` change : un appel ordinaire à une opération retournant
+`Result<T,E>` produit `T` ou arrête le programme sur erreur. Écrire `try appel()`
+pour conserver et inspecter le `Result` ; remplacer les anciennes propagations
+implicites par une branche explicite qui retourne l’erreur. Mettre à jour ensemble
+le compilateur et les packages qui adoptent ce contrat.
+
+Dans un constructeur explicite, initialiser chaque champ de classe sur tous les
+chemins. Pour demander sa construction préalable, écrire une expression `=` sur
+le champ. Les emprunts de callbacks qui peuvent dépasser leur liaison sont
+rejetés ; conserver une méthode liée possédée lorsque son récepteur doit survivre.
+`round_float<T>` demande explicitement un arrondi ; `as` reste sans perte.
+
+Les optimisations communes et les corrections propres à ARM64, X64 ou LLVM sont
+distinguées ci-dessus. Les mesures citées sont des qualifications locales sur
+macOS ARM64 et sur les charges indiquées ; elles ne promettent aucun gain général
+ni une parité de performance entre plateformes. Les contrôles de distribution
+ne remplacent pas ces campagnes de mesure.
 
 ## [0.47.1] - 2026-09-25
 
