@@ -380,9 +380,13 @@ pub const Analyzer = struct {
                 .functions = try functions.toOwnedSlice(self.allocator),
             };
         };
-        if (try @import("CallbackProvenance.zig").check(self.allocator, analyzed)) |diagnostic| {
-            self.diagnostic = diagnostic;
-            return error.InvalidSource;
+        {
+            var span = self.traceSpan(.semantic_callback_provenance);
+            defer span.finish();
+            if (try @import("CallbackProvenance.zig").checkWithTrace(self.allocator, analyzed, self.trace)) |diagnostic| {
+                self.diagnostic = diagnostic;
+                return error.InvalidSource;
+            }
         }
         return analyzed;
     }

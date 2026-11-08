@@ -3,6 +3,7 @@ const Frontend = @import("Frontend.zig");
 const Ir = @import("Ir.zig");
 const Immediate = @import("Semantic/CallbackFlow/Immediate.zig");
 const Provenance = @import("Semantic/CallbackProvenance.zig");
+const CompilationTrace = @import("CompilationTrace.zig");
 const Interpreter = @import("Interpreter.zig");
 
 const slot = "class Slot { var callback:(func())? = null; func set(callback:func()) { self.callback = callback } func clear() { self.callback = null } } ";
@@ -117,4 +118,38 @@ test "callback provenance does not certify a callback parameter without its body
         if (std.mem.eql(u8, f.name, "invoke")) f.blocks = &.{};
     }
     try std.testing.expect(!(try Immediate.origins(a, program))[main_id orelse return error.TestUnexpectedResult]);
+}
+
+test "callback provenance trace preserves IR and counts only enabled analysis" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var frontend = Frontend.Frontend.init(a);
+    const program = (try frontend.compile(slot ++
+        \\func setup(target:Slot) { let value=7; target.set(func() { print(value) }); target.clear() }
+        \\func main() {}
+    )).ir;
+    const before = try Ir.writeText(a, program);
+    var environment = std.process.Environ.Map.init(a);
+    defer environment.deinit();
+    const metadata: CompilationTrace.Metadata = .{
+        .command = .compile,
+        .backend = "native",
+        .source_path = "Trace.sx",
+        .target = "macos-arm64",
+        .mode = "debug",
+        .cache_enabled = false,
+        .compiler_version = "test",
+    };
+    var disabled = CompilationTrace.Reporter.init(std.testing.io, &environment, metadata);
+    try std.testing.expect((try Provenance.checkWithTrace(a, program, &disabled)) == null);
+    try std.testing.expectEqual(@as(usize, 0), disabled.metrics.callback_origins);
+    try std.testing.expectEqual(@as(usize, 0), disabled.metrics.callback_evaluations);
+    try environment.put(CompilationTrace.environment_name, "unused-trace.json");
+    var enabled = CompilationTrace.Reporter.init(std.testing.io, &environment, metadata);
+    try std.testing.expect((try Provenance.checkWithTrace(a, program, &enabled)) == null);
+    try std.testing.expect(enabled.metrics.callback_origins > 0);
+    try std.testing.expect(enabled.metrics.callback_frames > 0);
+    try std.testing.expect(enabled.metrics.callback_evaluations >= enabled.metrics.callback_frames);
+    try std.testing.expectEqualStrings(before, try Ir.writeText(a, program));
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
 const Source = @import("../Source.zig");
+const CompilationTrace = @import("../CompilationTrace.zig");
 const M = @import("CallbackFlow/Model.zig");
 const Finalization = @import("CallbackFlow/Finalization.zig");
 const Refine = @import("CallbackFlow/Refine.zig");
@@ -12,7 +13,12 @@ const Value = M.Value;
 /// Interpret callback ownership on the complete typed graph, after package
 /// restoration. This does not rewrite the program used by either backend.
 pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
+    return checkWithTrace(allocator, program, null);
+}
+
+pub fn checkWithTrace(allocator: A, program: Ir.Program, trace: ?*CompilationTrace.Reporter) !?Source.Diagnostic {
     _ = allocator;
+    const active_trace: ?*CompilationTrace.Reporter = if (trace) |reporter| (if (reporter.enabled()) reporter else null) else null;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -33,6 +39,7 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
     const immediate = try @import("CallbackFlow/Immediate.zig").origins(a, program);
     for (program.functions, 0..) |_, source| {
         if (!borrowed[source] or immediate[source]) continue;
+        if (active_trace) |reporter| reporter.metrics.callback_origins +|= 1;
         var partition = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer partition.deinit();
         const owned = partition.allocator();
@@ -56,7 +63,7 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
                 if (pass == 1 and (root == source or (!f.is_test_entry and !std.mem.eql(u8, f.name, "main")))) continue;
                 var local = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer local.deinit();
-                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators, .looping_blocks = looping_blocks, .predicates = predicates, .cleanup_functions = cleanup_functions, .resource_loops = resource_loops };
+                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators, .looping_blocks = looping_blocks, .predicates = predicates, .cleanup_functions = cleanup_functions, .resource_loops = resource_loops, .trace = active_trace };
                 const globals = try engine.object(0, .local, M.wildcard, null, false);
                 engine.globals = globals;
                 var state: M.Memory = .empty;
@@ -74,6 +81,7 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
 }
 
 pub const Engine = struct {
+    trace: ?*CompilationTrace.Reporter = null,
     a: A,
     storage: A,
     program: Ir.Program,
@@ -312,6 +320,7 @@ pub const Engine = struct {
         };
     }
     fn newFrame(self: *Engine, function: usize, parent: ?usize, site: usize) A.Error!usize {
+        if (self.trace) |trace| trace.metrics.callback_frames +|= 1;
         const id = self.frames.items.len;
         const frame = try self.storage.create(M.Frame);
         const repeated = if (parent) |caller| self.repeatedCall(caller, site) else false;
@@ -374,10 +383,13 @@ pub const Engine = struct {
             }
             ancestor = frame.parent;
         }
-        for (self.frames.items, 0..) |frame, id| if (frame.parent == parent and frame.site == site and frame.function == function) {
-            if (self.repeatedCall(parent, site) and !frame.repeated) self.repeatFrame(id);
-            return self.evaluate(id, arguments, memory);
-        };
+        for (self.frames.items, 0..) |frame, id| {
+            if (self.trace) |trace| trace.metrics.callback_frame_lookup_visits +|= 1;
+            if (frame.parent == parent and frame.site == site and frame.function == function) {
+                if (self.repeatedCall(parent, site) and !frame.repeated) self.repeatFrame(id);
+                return self.evaluate(id, arguments, memory);
+            }
+        }
         return self.evaluate(try self.newFrame(function, parent, site), arguments, memory);
     }
     pub fn callReachable(self: *Engine, function: usize, arguments: []const Value) bool {
@@ -449,8 +461,10 @@ pub const Engine = struct {
         return false;
     }
     pub fn invalidateMutableFacts(self: *Engine, memory: *M.Memory) A.Error!void {
+        if (self.trace) |trace| trace.metrics.callback_fact_invalidations +|= 1;
         var it = memory.iterator();
         while (it.next()) |entry| {
+            if (self.trace) |trace| trace.metrics.callback_fact_cells_scanned +|= 1;
             if ((entry.value_ptr.scalar == .bottom or entry.value_ptr.scalar == .unknown) and entry.value_ptr.presence != .absent and entry.value_ptr.presence != .present) continue;
             const owner = self.nodes.items[entry.key_ptr.object];
             if (owner == .callable) continue;
@@ -536,6 +550,7 @@ pub const Engine = struct {
         return false;
     }
     fn evaluate(self: *Engine, id: usize, arguments: []const Value, memory: *M.Memory) A.Error!Value {
+        if (self.trace) |trace| trace.metrics.callback_evaluations +|= 1;
         const frame = self.frames.items[id];
         frame.context_boundary = self.nodes.items.len;
         var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
