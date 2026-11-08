@@ -731,9 +731,9 @@ test "native bound callbacks own and release their receiver graph" {
 }
 
 func main() {
+    // Keep this entry interpretable; raw C stores are exercised by the native test below.
     DebugCopies.floating_exercise()
     AggregateCallCoordinates.exercise()
-    InteropSignedStorage.exercise()
     assert(DebugCopies.exercise(5) == 48)
     assert(DebugCopies.exercise(9) == 64)
     verify_owned_callbacks()

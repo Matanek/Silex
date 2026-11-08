@@ -380,6 +380,13 @@ jobs:
             test "$callbacks_output" = "42"
           done
 
+      - name: Verify signed C storage in native Debug and Release
+        shell: bash
+        run: |
+          sh .github/scripts/smoke-native-memory.sh \
+            "$RUNNER_TEMP/silex-prefix/bin/silex" \
+            "$RUNNER_TEMP/signed-storage"
+
   optimizer-x64:
     if: inputs.target == 'optimizer-x64'
     runs-on: macos-15-intel
@@ -706,6 +713,13 @@ jobs:
             test "$callbacks_output" = "42"
           done
 
+      - name: Verify signed C storage in native Debug and Release
+        shell: bash
+        run: |
+          sh .github/scripts/smoke-native-memory.sh \
+            "$RUNNER_TEMP/silex-prefix/bin/silex" \
+            "$RUNNER_TEMP/signed-storage"
+
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
     runs-on: ubuntu-24.04
@@ -867,6 +881,13 @@ jobs:
             callbacks_output=$("$RUNNER_TEMP/module-callbacks-$mode")
             test "$callbacks_output" = "42"
           done
+
+      - name: Verify signed C storage in native Debug and Release
+        shell: bash
+        run: |
+          sh .github/scripts/smoke-native-memory.sh \
+            "$RUNNER_TEMP/silex-prefix/bin/silex" \
+            "$RUNNER_TEMP/signed-storage"
 
   windows-x64:
     if: inputs.target == 'all' || inputs.target == 'windows-x64'
@@ -1097,6 +1118,13 @@ jobs:
               throw "module callbacks regression: $mode"
             }
           }
+
+      - name: Verify signed C storage in native Debug and Release
+        shell: bash
+        run: |
+          sh .github/scripts/smoke-native-memory.sh \
+            "$RUNNER_TEMP/silex-prefix/bin/silex.exe" \
+            "$RUNNER_TEMP/signed-storage"
 
   windows-arm64-build:
     if: inputs.target == 'all' || inputs.target == 'windows-arm64'
@@ -1484,3 +1512,11 @@ jobs:
               throw "module callbacks regression: $mode"
             }
           }
+
+      - name: Verify signed C storage in native Debug and Release
+        shell: bash
+        run: |
+          sh .github/scripts/smoke-native-memory.sh \
+            "$RUNNER_TEMP/silex-prefix/bin/silex.exe" \
+            "$RUNNER_TEMP/signed-storage"
+
