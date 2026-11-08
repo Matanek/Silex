@@ -109,6 +109,9 @@ fn cycle(e: anytype, origin: usize, current: usize, memory: M.Memory, visited: *
 // concrete allocation has one exact class. Bound method owners obey this too.
 fn possibleClass(program: Ir.Program, object: @FieldType(M.Node, "object"), candidate: usize) bool {
     const upper_bound = (object.type orelse return true).structureIndex() orelse return true;
+    // An erased protocol shape is not a nominal class upper bound. It can
+    // survive a witness extraction or a bound-method capture.
+    if (!program.structures[upper_bound].is_class) return true;
     if (object.unknown_parent == null) return candidate == upper_bound;
     var current: ?usize = candidate;
     while (current) |index| : (current = program.structures[index].base) {
@@ -123,6 +126,7 @@ test "callback finalizers keep subclass plans and exclude unrelated unknown owne
         .{ .name = "Derived", .fields = &.{}, .is_class = true, .base = 0 },
         .{ .name = "Sibling", .fields = &.{}, .is_class = true, .base = 0 },
         .{ .name = "Unrelated", .fields = &.{}, .is_class = true },
+        .{ .name = "Erased", .fields = &.{}, .is_protocol = true },
     } };
     const base: @FieldType(M.Node, "object") = .{ .type = .structure(0), .many = false, .external = true, .unknown_parent = 0 };
     try std.testing.expect(possibleClass(p, base, 0));
@@ -134,6 +138,11 @@ test "callback finalizers keep subclass plans and exclude unrelated unknown owne
     try std.testing.expect(possibleClass(p, derived, 1));
     try std.testing.expect(!possibleClass(p, derived, 0));
     try std.testing.expect(!possibleClass(p, derived, 2));
+    var erased = base;
+    erased.type = .structure(4);
+    try std.testing.expect(possibleClass(p, erased, 0));
+    try std.testing.expect(possibleClass(p, erased, 1));
+    try std.testing.expect(possibleClass(p, erased, 3));
     var concrete = base;
     concrete.unknown_parent = null;
     try std.testing.expect(possibleClass(p, concrete, 0));
