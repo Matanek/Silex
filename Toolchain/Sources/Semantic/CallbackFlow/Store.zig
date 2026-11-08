@@ -6,6 +6,7 @@ const A = std.mem.Allocator;
 pub fn Store(comptime K: type, comptime V: type) type {
     return struct {
         const Self = @This();
+        const tracks_controls = K != usize and @hasDecl(V, "hasKnownControl");
         const Node = struct {
             key: K,
             value: V,
@@ -13,6 +14,7 @@ pub fn Store(comptime K: type, comptime V: type) type {
             right: ?*const Node,
             height: usize,
             region: *anyopaque,
+            known_controls: if (tracks_controls) bool else void,
         };
         root: ?*const Node = null,
         pub const empty: Self = .{};
@@ -29,9 +31,13 @@ pub fn Store(comptime K: type, comptime V: type) type {
         fn height(node: ?*const Node) usize {
             return if (node) |n| n.height else 0;
         }
+        fn hasKnown(root: ?*const Node) bool {
+            if (comptime tracks_controls) return if (root) |node| node.known_controls else false;
+            return false;
+        }
         fn make(a: A, key: K, value: V, left: ?*const Node, right: ?*const Node) A.Error!*const Node {
             const node = try a.create(Node);
-            node.* = .{ .key = key, .value = value, .left = left, .right = right, .height = 1 + @max(height(left), height(right)), .region = a.ptr };
+            node.* = .{ .key = key, .value = value, .left = left, .right = right, .height = 1 + @max(height(left), height(right)), .region = a.ptr, .known_controls = if (tracks_controls) value.hasKnownControl() or hasKnown(left) or hasKnown(right) else {} };
             return node;
         }
         fn balanced(a: A, key: K, value: V, left: ?*const Node, right: ?*const Node) A.Error!*const Node {
@@ -94,28 +100,39 @@ pub fn Store(comptime K: type, comptime V: type) type {
             depth: usize = 0,
             current: ?*const Node,
             baseline: Self = .empty,
+            known_only: bool = false,
             pub const Entry = struct { key_ptr: *const K, value_ptr: *const V };
             pub fn next(self: *Iterator) ?Entry {
-                while (self.current) |node| {
-                    // Shared immutable subtrees are already present in the
-                    // target; comparing their contents again adds no facts.
-                    if (self.baseline.root != null and self.baseline.find(node.key) == node) {
-                        self.current = null;
-                        break;
+                while (true) {
+                    while (self.current) |node| {
+                        if (comptime tracks_controls) if (self.known_only and !node.known_controls) {
+                            self.current = null;
+                            break;
+                        };
+                        // Shared immutable subtrees are already present in the
+                        // target; comparing their contents again adds no facts.
+                        if (self.baseline.root != null and self.baseline.find(node.key) == node) {
+                            self.current = null;
+                            break;
+                        }
+                        self.stack[self.depth] = node;
+                        self.depth += 1;
+                        self.current = node.left;
                     }
-                    self.stack[self.depth] = node;
-                    self.depth += 1;
-                    self.current = node.left;
+                    if (self.depth == 0) return null;
+                    self.depth -= 1;
+                    const node = self.stack[self.depth];
+                    self.current = node.right;
+                    if (comptime tracks_controls) if (self.known_only and !node.value.hasKnownControl()) continue;
+                    return .{ .key_ptr = &node.key, .value_ptr = &node.value };
                 }
-                if (self.depth == 0) return null;
-                self.depth -= 1;
-                const node = self.stack[self.depth];
-                self.current = node.right;
-                return .{ .key_ptr = &node.key, .value_ptr = &node.value };
             }
         };
         pub fn iterator(self: Self) Iterator {
             return .{ .current = self.root };
+        }
+        pub fn knownControls(self: Self) Iterator {
+            return .{ .current = self.root, .known_only = true };
         }
         pub fn changedSince(self: Self, baseline: Self) Iterator {
             return .{ .current = self.root, .baseline = baseline };

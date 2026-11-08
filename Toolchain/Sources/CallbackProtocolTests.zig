@@ -88,6 +88,7 @@ fn boxedClassTag(unknown_parent: bool, mixed: bool) !void {
         .{ .name = "Handler", .fields = &.{}, .is_protocol = true },
         .{ .name = "Base", .fields = &.{}, .is_class = true },
         .{ .name = "Child", .fields = &.{}, .is_class = true, .base = 1 },
+        .{ .name = "GrandChild", .fields = &.{}, .is_class = true, .base = 2 },
     };
     const functions = [_]Ir.Function{.{ .name = "box", .parameter_types = &.{}, .return_type = .void, .value_types = &.{ .structure(1), .structure(0), .bool }, .blocks = &.{} }};
     const p: Ir.Program = .{ .structures = &types, .functions = &functions };
@@ -104,17 +105,22 @@ fn boxedClassTag(unknown_parent: bool, mixed: bool) !void {
     try state.set(a, 0, input);
     try Transfer.step(&e, 0, 0, 0, .{ .protocol_init = .{ .result = 1, .operand = 0, .structure = 1 } }, &state);
     if (unknown_parent or mixed) {
-        try std.testing.expect(state.get(1).scalar == .unknown);
+        const tags = state.get(1).scalar.choices.values;
+        try std.testing.expectEqualSlices(usize, if (unknown_parent) &.{ 2, 3 } else &.{ 1, 2 }, tags);
     } else {
         try std.testing.expectEqual(@as(usize, 2), state.get(1).scalar.protocol);
     }
     try Transfer.step(&e, 0, 0, 1, .{ .protocol_test = .{ .result = 2, .operand = 1, .structure = 1 } }, &state);
-    if (unknown_parent or mixed) try std.testing.expect(state.get(2).scalar == .unknown) else try std.testing.expectEqual(false, state.get(2).scalar.boolean);
+    if (mixed) try std.testing.expect(state.get(2).scalar == .unknown) else try std.testing.expectEqual(false, state.get(2).scalar.boolean);
+    if (unknown_parent) {
+        try std.testing.expect(state.get(1).scalar.matches(null, 2) == null);
+        try std.testing.expect(state.get(1).scalar.matches(null, 3) == null);
+    }
 }
 test "callback protocol boxing a base preserves the actual derived class tag" {
     try boxedClassTag(false, false);
 }
-test "callback protocol boxing a copied external shape does not prove its static class tag" {
+test "callback protocol boxing a copied external shape retains every possible subclass" {
     try boxedClassTag(true, false);
 }
 test "callback protocol boxing mixed dynamic classes keeps all alternatives" {

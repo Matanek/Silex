@@ -71,9 +71,8 @@ pub fn drop(e: anytype, frame: usize, site: usize, op: Ir.Instruction.ClassDrop,
         var merged: M.Memory = if (definite) .empty else try M.cloneMemory(e.a, memory.*);
         var any = false;
         const object = e.nodes.items[id].object;
-        const concrete: ?usize = if (object.unknown_parent == null) (if (object.type) |t| t.structureIndex() else null) else null;
         for (op.plans) |plan| {
-            if (concrete != null and concrete.? != plan.structure) continue;
+            if (!possibleClass(e.program, object, plan.structure)) continue;
             any = true;
             var branch = try M.cloneMemory(e.a, memory.*);
             var dead = after;
@@ -104,4 +103,39 @@ fn cycle(e: anytype, origin: usize, current: usize, memory: M.Memory, visited: *
         for (entry.value_ptr.nodes) |child| if (try cycle(e, origin, child, memory, visited, false)) return true;
     }
     return false;
+}
+
+// An unknown instance ranges over its declared class and subclasses, while a
+// concrete allocation has one exact class. Bound method owners obey this too.
+fn possibleClass(program: Ir.Program, object: @FieldType(M.Node, "object"), candidate: usize) bool {
+    const upper_bound = (object.type orelse return true).structureIndex() orelse return true;
+    if (object.unknown_parent == null) return candidate == upper_bound;
+    var current: ?usize = candidate;
+    while (current) |index| : (current = program.structures[index].base) {
+        if (index == upper_bound) return true;
+    }
+    return false;
+}
+
+test "callback finalizers keep subclass plans and exclude unrelated unknown owners" {
+    const p: Ir.Program = .{ .functions = &.{}, .structures = &.{
+        .{ .name = "Base", .fields = &.{}, .is_class = true },
+        .{ .name = "Derived", .fields = &.{}, .is_class = true, .base = 0 },
+        .{ .name = "Sibling", .fields = &.{}, .is_class = true, .base = 0 },
+        .{ .name = "Unrelated", .fields = &.{}, .is_class = true },
+    } };
+    const base: @FieldType(M.Node, "object") = .{ .type = .structure(0), .many = false, .external = true, .unknown_parent = 0 };
+    try std.testing.expect(possibleClass(p, base, 0));
+    try std.testing.expect(possibleClass(p, base, 1));
+    try std.testing.expect(possibleClass(p, base, 2));
+    try std.testing.expect(!possibleClass(p, base, 3));
+    var derived = base;
+    derived.type = .structure(1);
+    try std.testing.expect(possibleClass(p, derived, 1));
+    try std.testing.expect(!possibleClass(p, derived, 0));
+    try std.testing.expect(!possibleClass(p, derived, 2));
+    var concrete = base;
+    concrete.unknown_parent = null;
+    try std.testing.expect(possibleClass(p, concrete, 0));
+    try std.testing.expect(!possibleClass(p, concrete, 1));
 }

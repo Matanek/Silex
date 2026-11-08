@@ -41,12 +41,24 @@ pub fn apply(e: anytype, frame: usize, block: usize, taken: bool, state: *M.Stat
             var keep = true;
             if (n == .object) if (n.object.type) |t| if (t.structureIndex()) |index| {
                 const structure = e.program.structures[index];
-                if (!structure.is_protocol and (!structure.is_class or n.object.unknown_parent == null)) keep = (index == predicate.tag) == taken;
+                if (!structure.is_protocol) {
+                    if (!structure.is_class or n.object.unknown_parent == null) keep = (index == predicate.tag) == taken else if (taken) keep = @import("ClassBounds.zig").subtype(e.program, predicate.tag, index) else if (index == predicate.tag and e.class_tags.len != 0 and e.class_tags[index].len == 1) keep = false;
+                }
             };
             if (keep) try nodes.append(e.a, id);
         }
         value.nodes = try nodes.toOwnedSlice(e.a);
-    } else value.nodes = try e.a.dupe(usize, value.nodes);
+    } else {
+        var nodes: std.ArrayList(usize) = .empty;
+        for (value.nodes) |id| {
+            const node = e.nodes.items[id];
+            if (node == .object) if (node.object.enum_tag) |tag| {
+                if (tag.enumeration == predicate.enumeration.? and ((tag.variant == predicate.tag) != taken)) continue;
+            };
+            try nodes.append(e.a, id);
+        }
+        value.nodes = try nodes.toOwnedSlice(e.a);
+    }
     value.region = e.a.ptr;
     try state.set(e.a, predicate.operand, value);
     return true;

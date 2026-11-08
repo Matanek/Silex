@@ -8,6 +8,13 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- L’analyse des callbacks conserve le discriminant des enums avec charge utile
+  et sépare leurs contenus dans les branches, sans présumer leur égalité. Les
+  finaliseurs d’un receveur inconnu sont limités à sa classe déclarée et à ses
+  sous-classes. Les entrées de bloc écartent les valeurs SSA mortes, les appels
+  réutilisent un index de contextes exact et les invalidations parcourent les
+  seuls faits connus ; mémoire, propriété et règles de capture restent suivies.
+
 - L’analyse des callbacks évite de reparcourir une mémoire abstraite dont les
   faits mutables ont déjà été invalidés, tant qu’aucun nouveau fait connu n’est
   écrit. Les branches, jonctions et changements d’arena préservent la validité

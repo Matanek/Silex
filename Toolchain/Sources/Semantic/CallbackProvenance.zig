@@ -16,7 +16,18 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
     return checkWithTrace(allocator, program, null);
 }
 
+pub const Options = struct {
+    payload_tags: bool = true,
+    prune_dead_values: bool = true,
+    index_frames: bool = true,
+    sparse_controls: bool = true,
+};
+
 pub fn checkWithTrace(allocator: A, program: Ir.Program, trace: ?*CompilationTrace.Reporter) !?Source.Diagnostic {
+    return checkConfigured(allocator, program, trace, .{});
+}
+
+pub fn checkConfigured(allocator: A, program: Ir.Program, trace: ?*CompilationTrace.Reporter, options: Options) !?Source.Diagnostic {
     _ = allocator;
     const active_trace: ?*CompilationTrace.Reporter = if (trace) |reporter| (if (reporter.enabled()) reporter else null) else null;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -34,6 +45,7 @@ pub fn checkWithTrace(allocator: A, program: Ir.Program, trace: ?*CompilationTra
     if (!any) return null;
     const predicates = try Refine.program(a, program);
     const looping_blocks = try @import("CallbackFlow/Loops.zig").program(a, program);
+    var live_cache = try @import("CallbackFlow/LiveValues.zig").Cache.init(a, program);
     const resource_loops = try ResourceLoops.program(a, program);
     const cleanup_functions = try @import("CallbackFlow/Cleanup.zig").program(a, program);
     const immediate = try @import("CallbackFlow/Immediate.zig").origins(a, program);
@@ -63,7 +75,7 @@ pub fn checkWithTrace(allocator: A, program: Ir.Program, trace: ?*CompilationTra
                 if (pass == 1 and (root == source or (!f.is_test_entry and !std.mem.eql(u8, f.name, "main")))) continue;
                 var local = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer local.deinit();
-                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators, .looping_blocks = looping_blocks, .predicates = predicates, .cleanup_functions = cleanup_functions, .resource_loops = resource_loops, .trace = active_trace };
+                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators, .looping_blocks = looping_blocks, .predicates = predicates, .cleanup_functions = cleanup_functions, .resource_loops = resource_loops, .trace = active_trace, .options = options, .live_cache = if (options.prune_dead_values) &live_cache else null };
                 const globals = try engine.object(0, .local, M.wildcard, null, false);
                 engine.globals = globals;
                 var state: M.Memory = .empty;
@@ -81,6 +93,11 @@ pub fn checkWithTrace(allocator: A, program: Ir.Program, trace: ?*CompilationTra
 }
 
 pub const Engine = struct {
+    class_tags: []const []const usize = &.{},
+    options: Options = .{},
+    live_cache: ?*@import("CallbackFlow/LiveValues.zig").Cache = null,
+    frame_index: std.AutoHashMapUnmanaged(struct { parent: usize, site: usize, function: usize }, usize) = .empty,
+    indexed_frames: usize = 0,
     trace: ?*CompilationTrace.Reporter = null,
     a: A,
     storage: A,
@@ -107,6 +124,7 @@ pub const Engine = struct {
                 .object => |*o| {
                     o.many = o.many or node_value.object.many;
                     if (o.length != node_value.object.length) o.length = null;
+                    if (!std.meta.eql(o.enum_tag, node_value.object.enum_tag)) o.enum_tag = null;
                     if (o.unknown_parent == null) o.unknown_parent = node_value.object.unknown_parent;
                 },
                 .callable => |*c| {
@@ -383,6 +401,23 @@ pub const Engine = struct {
             }
             ancestor = frame.parent;
         }
+        if (self.options.index_frames) {
+            while (self.indexed_frames < self.frames.items.len) {
+                const id = self.indexed_frames;
+                const indexed = self.frames.items[id];
+                if (self.trace) |trace| trace.metrics.callback_frame_lookup_visits +|= 1;
+                if (indexed.parent) |caller| {
+                    const entry = try self.frame_index.getOrPut(self.storage, .{ .parent = caller, .site = indexed.site, .function = indexed.function });
+                    if (!entry.found_existing) entry.value_ptr.* = id;
+                }
+                self.indexed_frames += 1;
+            }
+            if (self.frame_index.get(.{ .parent = parent, .site = site, .function = function })) |id| {
+                if (self.repeatedCall(parent, site) and !self.frames.items[id].repeated) self.repeatFrame(id);
+                return self.evaluate(id, arguments, memory);
+            }
+            return self.evaluate(try self.newFrame(function, parent, site), arguments, memory);
+        }
         for (self.frames.items, 0..) |frame, id| {
             if (self.trace) |trace| trace.metrics.callback_frame_lookup_visits +|= 1;
             if (frame.parent == parent and frame.site == site and frame.function == function) {
@@ -463,7 +498,7 @@ pub const Engine = struct {
     pub fn invalidateMutableFacts(self: *Engine, memory: *M.Memory) A.Error!void {
         if (self.trace) |trace| trace.metrics.callback_fact_invalidations +|= 1;
         if (memory.mutable_facts_invalidated) return;
-        var it = memory.iterator();
+        var it = if (self.options.sparse_controls) memory.knownControls() else memory.iterator();
         while (it.next()) |entry| {
             if (self.trace) |trace| trace.metrics.callback_fact_cells_scanned +|= 1;
             if (!entry.value_ptr.hasKnownControl()) continue;
@@ -554,6 +589,7 @@ pub const Engine = struct {
     fn evaluate(self: *Engine, id: usize, arguments: []const Value, memory: *M.Memory) A.Error!Value {
         if (self.trace) |trace| trace.metrics.callback_evaluations +|= 1;
         const frame = self.frames.items[id];
+        const live_values: []const []const bool = if (self.live_cache) |cache| try cache.get(frame.function) else &.{};
         frame.context_boundary = self.nodes.items.len;
         var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer scratch.deinit();
@@ -629,7 +665,7 @@ pub const Engine = struct {
                                     if (self.diagnostic != null) return .{};
                                     if (state.reachable) {
                                         try state.set(self.a, plan.condition, .{ .scalar = .{ .boolean = false } });
-                                        if (try self.joinEntry(&entries[plan.exit], state)) pending[plan.exit] = true;
+                                        if (try self.joinEntry(&entries[plan.exit], state, live_values, plan.exit)) pending[plan.exit] = true;
                                     }
                                 }
                                 continue;
@@ -649,18 +685,18 @@ pub const Engine = struct {
                                 const output_changed = try M.joinMemory(self.a, &frame.output, state.memory);
                                 frame.changed = returned_changed or output_changed or frame.changed;
                             },
-                            .jump => |target| if (try self.joinEntry(&entries[target], state)) {
+                            .jump => |target| if (try self.joinEntry(&entries[target], state, live_values, target)) {
                                 pending[target] = true;
                             },
                             .branch => |branch| {
                                 const condition = state.get(branch.condition).scalar;
                                 if (condition != .boolean or condition.boolean) {
                                     var next = state;
-                                    if (try Refine.apply(self, id, block_id, true, &next) and try self.joinEntry(&entries[branch.then_block], next)) pending[branch.then_block] = true;
+                                    if (try Refine.apply(self, id, block_id, true, &next) and try self.joinEntry(&entries[branch.then_block], next, live_values, branch.then_block)) pending[branch.then_block] = true;
                                 }
                                 if (condition != .boolean or !condition.boolean) {
                                     var next = state;
-                                    if (try Refine.apply(self, id, block_id, false, &next) and try self.joinEntry(&entries[branch.else_block], next)) pending[branch.else_block] = true;
+                                    if (try Refine.apply(self, id, block_id, false, &next) and try self.joinEntry(&entries[branch.else_block], next, live_values, branch.else_block)) pending[branch.else_block] = true;
                                 }
                             },
                             else => {},
@@ -691,9 +727,26 @@ pub const Engine = struct {
             }
         }
     }
-    fn joinEntry(self: *Engine, target: *?M.State, state: M.State) A.Error!bool {
-        if (target.*) |*entry| return entry.join(self.a, state);
-        target.* = try state.clone(self.a);
+    fn joinEntry(self: *Engine, target: *?M.State, state: M.State, live: []const []const bool, block: usize) A.Error!bool {
+        var projected = state;
+        if (live.len != 0) {
+            const mask = live[block];
+            var values = state.values.iterator();
+            var any_dead = false;
+            while (values.next()) |entry| if (entry.key_ptr.* < mask.len and !mask[entry.key_ptr.*]) {
+                any_dead = true;
+                break;
+            };
+            if (any_dead) {
+                projected.values = .empty;
+                values = state.values.iterator();
+                while (values.next()) |entry| {
+                    if (entry.key_ptr.* >= mask.len or mask[entry.key_ptr.*]) try projected.values.put(self.a, entry.key_ptr.*, entry.value_ptr.*);
+                }
+            }
+        }
+        if (target.*) |*entry| return entry.join(self.a, projected);
+        target.* = try projected.clone(self.a);
         return true;
     }
     fn scopeEnd(self: *Engine, frame: usize, end: Ir.BorrowEnd, state: *M.State) A.Error!void {

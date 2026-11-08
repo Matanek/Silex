@@ -142,7 +142,7 @@ pub const Value = struct {
     pub fn hasKnownControl(self: Value) bool {
         return (self.scalar != .bottom and self.scalar != .unknown) or self.presence == .absent or self.presence == .present;
     }
-    pub fn controlEqual(a: Value, b: Value) ?bool {
+    pub fn controlEqual(program: Ir.Program, a: Value, b: Value) ?bool {
         if (a.presence != .bottom or b.presence != .bottom) {
             if (a.presence == .absent) return switch (b.presence) {
                 .absent => true,
@@ -155,7 +155,14 @@ pub const Value = struct {
             };
             if (a.presence != .present or b.presence != .present) return null;
         }
-        return Scalar.equal(a.scalar, b.scalar);
+        const result = Scalar.equal(a.scalar, b.scalar);
+        if (result == true) {
+            var single_tag: [1]usize = undefined;
+            if (a.scalar.tags(&single_tag)) |ts| if (ts.enumeration) |enumeration| {
+                if (ts.values.len == 1 and program.enums[enumeration].variants[ts.values[0]].associated_types.len != 0) return null;
+            };
+        }
+        return result;
     }
     // Values are immutable: branch snapshots never share a mutable set buffer.
     pub fn join(a: Value, b: Value, allocator: Allocator) !Value {
@@ -263,6 +270,9 @@ pub const Memory = struct {
         try self.cells.put(a, key, value);
         if (value.hasKnownControl()) self.mutable_facts_invalidated = false;
     }
+    pub fn knownControls(self: Memory) Store(Cell, Value).Iterator {
+        return self.cells.knownControls();
+    }
     pub fn iterator(self: *const Memory) Store(Cell, Value).Iterator {
         return self.cells.iterator();
     }
@@ -339,8 +349,9 @@ pub fn joinMemoryOwned(a: Allocator, target: *Memory, source: Memory) !bool {
     return changed;
 }
 pub const Loan = struct { frame: usize, lifetime: usize };
+pub const EnumTag = struct { enumeration: usize, variant: usize };
 pub const Node = union(enum) {
-    object: struct { type: ?Ir.Type, many: bool, unknown_parent: ?usize = null, external: bool = false, length: ?usize = null },
+    object: struct { type: ?Ir.Type, many: bool, unknown_parent: ?usize = null, external: bool = false, length: ?usize = null, enum_tag: ?EnumTag = null },
     address: Cell,
     callable: struct { function: usize, loans: []const Loan, many: bool },
 };

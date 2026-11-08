@@ -70,7 +70,7 @@ fn transfer(e: anytype, frame_id: usize, block: usize, index: usize, op: Ir.Inst
                 };
                 try state.set(e.a, v.result, .{ .scalar = scalar });
             }
-            if (v.operator == .equal or v.operator == .not_equal) if (Value.controlEqual(left, right)) |known| {
+            if (v.operator == .equal or v.operator == .not_equal) if (Value.controlEqual(e.program, left, right)) |known| {
                 try state.set(e.a, v.result, .{ .scalar = .{ .boolean = if (v.operator == .equal) known else !known } });
             };
         },
@@ -100,32 +100,8 @@ fn transfer(e: anytype, frame_id: usize, block: usize, index: usize, op: Ir.Inst
             value.scalar = .unknown;
             if (!e.program.structures[v.structure].is_class) {
                 value.scalar = .{ .protocol = v.structure };
-            } else if (value.nodes.len != 0) {
-                // Boxing a base reference preserves the dynamic class type.
-                // External shapes, including their copies, do not prove it.
-                var concrete: ?usize = null;
-                var exact = true;
-                for (value.nodes) |id| {
-                    const node = e.nodes.items[id];
-                    if (node != .object or node.object.unknown_parent != null) {
-                        exact = false;
-                        break;
-                    }
-                    const t = (node.object.type orelse {
-                        exact = false;
-                        break;
-                    }).structureIndex() orelse {
-                        exact = false;
-                        break;
-                    };
-                    if (!e.program.structures[t].is_class or (concrete != null and concrete.? != t)) {
-                        exact = false;
-                        break;
-                    }
-                    concrete = t;
-                }
-                if (exact and concrete != null) value.scalar = .{ .protocol = concrete.? };
-            }
+            } else value.scalar = try @import("ClassBounds.zig").boxed(e, value, v.structure);
+
             try state.set(e.a, v.result, value);
         },
         .protocol_test => |v| {
@@ -175,11 +151,15 @@ fn transfer(e: anytype, frame_id: usize, block: usize, index: usize, op: Ir.Inst
         },
         .enum_init => |v| {
             if (M.capable(e.capable, f.value_types[v.result])) {
-                const object = try e.object(frame_id, .object, v.result, f.value_types[v.result], frame.recursive or frame.repeated or e.inLoop(frame.function, block));
+                const object = try e.node(.{ .frame = frame_id, .category = .object, .value = v.result }, .{ .object = .{
+                    .type = f.value_types[v.result],
+                    .many = frame.recursive or frame.repeated or e.inLoop(frame.function, block),
+                    .enum_tag = if (e.options.payload_tags) .{ .enumeration = v.enumeration, .variant = v.variant } else null,
+                } });
                 for (v.values, 0..) |field, n| try e.write(&state.memory, .{ .object = object, .field = n }, state.get(field), true);
                 try state.set(e.a, v.result, try Value.one(e.a, object));
             }
-            if (v.values.len == 0) {
+            if (e.options.payload_tags or v.values.len == 0) {
                 var value = state.get(v.result);
                 value.scalar = .{ .variant = .{ .enumeration = v.enumeration, .variant = v.variant } };
                 try state.set(e.a, v.result, value);

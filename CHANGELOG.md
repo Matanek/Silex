@@ -8,6 +8,12 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Callback analysis preserves discriminants and branch payloads for associated
+  enums without assuming payload equality. Unknown receivers use finalizers
+  only from their declared class and subclasses. Block entries omit dead SSA
+  values, calls use an exact context index, and invalidation visits only known
+  facts; memory, ownership, and capture rules remain tracked.
+
 - Callback analysis avoids rescanning abstract memory whose mutable facts have
   already been invalidated until a new known fact is written. Branches, joins,
   and arena changes preserve the validity of this reuse without changing
