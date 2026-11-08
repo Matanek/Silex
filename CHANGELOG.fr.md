@@ -6,6 +6,13 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
+## [Unreleased]
+
+- L’analyse des callbacks évite de reparcourir une mémoire abstraite dont les
+  faits mutables ont déjà été invalidés, tant qu’aucun nouveau fait connu n’est
+  écrit. Les branches, jonctions et changements d’arena préservent la validité
+  de cette réutilisation sans modifier les diagnostics ni les règles de capture.
+
 ## [0.48.0] - 2026-11-08
 
 ### Pourquoi mettre à jour ?

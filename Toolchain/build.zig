@@ -534,6 +534,11 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = test_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const callback_flow_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "callback" } });
+    callback_flow_tests.stack_size = test_stack_size;
+    const callback_flow_command = b.addRunArtifact(callback_flow_tests);
+    callback_flow_command.setCwd(b.path(""));
+    b.step("test-callback-flow", "Verify callback provenance and abstract-memory snapshots").dependOn(&callback_flow_command.step);
     const verification_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "verifier", "pass verification", "IR validation", "write deterministic typed IR", "Debug preparation" } });
     verification_tests.stack_size = test_stack_size;
     const verification_command = b.addRunArtifact(verification_tests);

@@ -203,6 +203,17 @@ releases its temporary arena at return after promoting its live result to the
 caller. Abstract object identities and loan metadata have root-analysis lifetime;
 recursive inputs are copied into the active ancestor, never retained from a
 shorter-lived descendant arena.
+
+Each memory snapshot also records whether its mutable control facts have already
+been invalidated. Repeated opaque notifications still participate in the proof,
+but need no further cell traversal until a known scalar or optional-presence
+value is written. Branch copies and arena promotion preserve that status;
+joins copy it with an unchanged map or invalidate it through writes of known values.
+The status is local to the snapshot, so it cannot confuse freed arena addresses
+with new allocations. It changes no serialized IR, generated runtime layout, or capture
+contract. Differential tests retain the former unconditional traversal as an
+oracle and check writes, branches, joins, and promotion after arena release.
+
 A non-generating call with no concrete value/callable input or external state
 adds no facts. This includes unknown external shapes with no materialized data;
 known state in any external input/global prevents skipping lazy aliases.

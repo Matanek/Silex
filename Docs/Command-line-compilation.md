@@ -171,9 +171,9 @@ Semantic measurements further separate materialization, preparation,
 validation, source functions, generated constructors and methods, resource
 helpers, finalization, and the complete callback-provenance check. Callback
 metrics count origins not discharged by the immediate-use proof, created frames,
-evaluations, frame-lookup visits, mutable-fact invalidations, and cells scanned by those
-invalidations. These counters are collected only for an enabled trace and do
-not change the ownership proof. Backend phases cover cache validation, program
+evaluations, frame-lookup visits, mutable-fact invalidation requests, and cells
+actually scanned by those requests. These counters are collected only for an
+enabled trace and do not change the ownership proof. Backend phases cover cache validation, program
 closure, shared optimization, backend lowering, emission, linking, output, and
 cache publication; native register allocation remains separately measured. The
 structural metrics report both the complete portable function count and the

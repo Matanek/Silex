@@ -462,10 +462,11 @@ pub const Engine = struct {
     }
     pub fn invalidateMutableFacts(self: *Engine, memory: *M.Memory) A.Error!void {
         if (self.trace) |trace| trace.metrics.callback_fact_invalidations +|= 1;
+        if (memory.mutable_facts_invalidated) return;
         var it = memory.iterator();
         while (it.next()) |entry| {
             if (self.trace) |trace| trace.metrics.callback_fact_cells_scanned +|= 1;
-            if ((entry.value_ptr.scalar == .bottom or entry.value_ptr.scalar == .unknown) and entry.value_ptr.presence != .absent and entry.value_ptr.presence != .present) continue;
+            if (!entry.value_ptr.hasKnownControl()) continue;
             const owner = self.nodes.items[entry.key_ptr.object];
             if (owner == .callable) continue;
             if (owner == .object) {
@@ -480,6 +481,7 @@ pub const Engine = struct {
             if (value.presence != .bottom) value.presence = .unknown;
             try memory.put(self.a, entry.key_ptr.*, value);
         }
+        memory.mutable_facts_invalidated = true;
     }
     pub fn indirect(self: *Engine, parent: usize, site: usize, callee: Value, arguments: []const Value, return_type: Ir.Type, memory: *M.Memory) A.Error!Value {
         var returned: Value = .{ .no_return = true };

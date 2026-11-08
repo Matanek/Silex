@@ -6,6 +6,13 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
+## [Unreleased]
+
+- Callback analysis avoids rescanning abstract memory whose mutable facts have
+  already been invalidated until a new known fact is written. Branches, joins,
+  and arena changes preserve the validity of this reuse without changing
+  diagnostics or capture rules.
+
 ## [0.48.0] - 2026-11-08
 
 ### Why upgrade?

@@ -5,6 +5,181 @@ const CacheBinary = @import("CacheBinary.zig");
 const Provenance = @import("Semantic/CallbackProvenance.zig");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
+const Flow = @import("Semantic/CallbackFlow/Model.zig");
+const Trace = @import("CompilationTrace.zig");
+
+fn factReporter() Trace.Reporter {
+    return .{ .io = std.testing.io, .output_path = "unused-trace.json", .started = .zero, .cache_result = .disabled, .metadata = .{
+        .command = .compile,
+        .backend = "native",
+        .source_path = "Facts.sx",
+        .target = "macos-arm64",
+        .mode = "debug",
+        .cache_enabled = false,
+        .compiler_version = "test",
+    } };
+}
+
+fn factEngine(a: std.mem.Allocator, trace: *Trace.Reporter) !Provenance.Engine {
+    const program: Ir.Program = .{
+        .functions = &.{},
+        .globals = &.{ .{ .name = "mutable", .type = .bool, .mutable = true }, .{ .name = "immutable", .type = .bool, .mutable = false } },
+        .structures = &.{.{ .name = "Flags", .is_class = true, .fields = &.{ .{ .name = "mutable", .type = .bool, .mutable = true }, .{ .name = "immutable", .type = .bool, .mutable = false } } }},
+    };
+    var e: Provenance.Engine = .{ .a = a, .storage = a, .program = program, .trace = trace, .capable = .{ .structures = &.{}, .functions = &.{} }, .relevant = &.{}, .borrowed = &.{}, .generators = &.{} };
+    e.globals = try e.object(0, .local, Flow.wildcard, null, false);
+    _ = try e.object(0, .object, 1, .structure(0), false);
+    _ = try e.node(.{ .frame = 0, .category = .callable, .value = 2 }, .{ .callable = .{ .function = 0, .loans = &.{}, .many = false } });
+    return e;
+}
+
+// Keep the former unconditional traversal independent of the reuse property.
+fn invalidateFactsOracle(e: *Provenance.Engine, memory: *Flow.Memory) !void {
+    var it = memory.iterator();
+    while (it.next()) |entry| {
+        if ((entry.value_ptr.scalar == .bottom or entry.value_ptr.scalar == .unknown) and entry.value_ptr.presence != .absent and entry.value_ptr.presence != .present) continue;
+        const owner = e.nodes.items[entry.key_ptr.object];
+        if (owner == .callable) continue;
+        if (owner == .object) {
+            if (owner.object.type) |t| if (t.structureIndex()) |index| {
+                const fields = e.program.structures[index].fields;
+                if (e.program.structures[index].collection == null and entry.key_ptr.field < fields.len and !fields[entry.key_ptr.field].mutable) continue;
+            };
+        }
+        if (entry.key_ptr.object == e.globals and entry.key_ptr.field < e.program.globals.len and !e.program.globals[entry.key_ptr.field].mutable) continue;
+        var value = entry.value_ptr.*;
+        if (value.scalar != .bottom) value.scalar = .unknown;
+        if (value.presence != .bottom) value.presence = .unknown;
+        try memory.put(e.a, entry.key_ptr.*, value);
+    }
+}
+
+fn expectSameFacts(expected: Flow.Memory, actual: Flow.Memory) !void {
+    var first = expected.iterator();
+    var second = actual.iterator();
+    while (first.next()) |entry| {
+        const other = second.next() orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqualDeep(entry.key_ptr.*, other.key_ptr.*);
+        try std.testing.expect(Flow.Value.eql(entry.value_ptr.*, other.value_ptr.*));
+    }
+    try std.testing.expect(second.next() == null);
+    var owners = expected.owners.iterator();
+    var other_owners = actual.owners.iterator();
+    while (owners.next()) |entry| {
+        const other = other_owners.next() orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(entry.key_ptr.*, other.key_ptr.*);
+        try std.testing.expectEqualDeep(entry.value_ptr.*, other.value_ptr.*);
+    }
+    try std.testing.expect(other_owners.next() == null);
+}
+
+test "callback mutable facts reuse invalidation until a known write" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var trace = factReporter();
+    var e = try factEngine(a, &trace);
+    var memory: Flow.Memory = .empty;
+    const facts = [_]Flow.Value{
+        .{},                                                                        .{ .scalar = .unknown },           .{ .scalar = .{ .boolean = true } },
+        .{ .scalar = .{ .zero = .int } },                                           .{ .scalar = .{ .protocol = 0 } }, .{ .scalar = .{ .variant = .{ .enumeration = 0, .variant = 1 } } },
+        .{ .scalar = .{ .choices = .{ .enumeration = 0, .values = &.{ 1, 2 } } } }, .{ .presence = .absent },          .{ .presence = .present },
+        .{ .presence = .unknown },
+    };
+    for (facts, 0..) |value, i| try memory.put(a, .{ .object = 1, .field = i + 2 }, value);
+    for ([_]usize{ 0, 1, 2 }) |object| for (0..2) |field| {
+        try memory.put(a, .{ .object = object, .field = field }, .{ .scalar = .{ .boolean = true } });
+    };
+    try memory.owners.put(a, 1, .{ .roots = .{ .low = 1, .high = 1 } });
+    var expected = memory;
+    try invalidateFactsOracle(&e, &expected);
+    try e.invalidateMutableFacts(&memory);
+    try expectSameFacts(expected, memory);
+    const scanned = trace.metrics.callback_fact_cells_scanned;
+    try std.testing.expect(scanned > 0);
+    for (0..16) |_| {
+        try invalidateFactsOracle(&e, &expected);
+        try e.invalidateMutableFacts(&memory);
+    }
+    try expectSameFacts(expected, memory);
+    try std.testing.expectEqual(scanned, trace.metrics.callback_fact_cells_scanned);
+    const unknown_cell: Flow.Cell = .{ .object = 1, .field = 99 };
+    try memory.put(a, unknown_cell, .{ .scalar = .unknown });
+    try expected.put(a, unknown_cell, .{ .scalar = .unknown });
+    try invalidateFactsOracle(&e, &expected);
+    try e.invalidateMutableFacts(&memory);
+    try expectSameFacts(expected, memory);
+    try std.testing.expectEqual(scanned, trace.metrics.callback_fact_cells_scanned);
+    try memory.put(a, unknown_cell, .{ .presence = .present });
+    try expected.put(a, unknown_cell, .{ .presence = .present });
+    try invalidateFactsOracle(&e, &expected);
+    try e.invalidateMutableFacts(&memory);
+    try expectSameFacts(expected, memory);
+    try std.testing.expect(trace.metrics.callback_fact_cells_scanned > scanned);
+}
+
+test "callback mutable facts preserve independent branches and promoted arenas" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var trace = factReporter();
+    var e = try factEngine(a, &trace);
+    var base: Flow.Memory = .empty;
+    const cell: Flow.Cell = .{ .object = 1, .field = 0 };
+    try base.put(a, cell, .{ .scalar = .{ .boolean = false } });
+    try e.invalidateMutableFacts(&base);
+    var branch = try Flow.cloneMemory(a, base);
+    try branch.put(a, cell, .{ .scalar = .{ .boolean = true } });
+    var expected = branch;
+    try invalidateFactsOracle(&e, &expected);
+    try e.invalidateMutableFacts(&branch);
+    try expectSameFacts(expected, branch);
+    const scanned = trace.metrics.callback_fact_cells_scanned;
+    try e.invalidateMutableFacts(&base);
+    try std.testing.expectEqual(scanned, trace.metrics.callback_fact_cells_scanned);
+    var promoted: Flow.Memory = undefined;
+    {
+        var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer scratch.deinit();
+        const temporary = scratch.allocator();
+        e.a = temporary;
+        defer e.a = a;
+        var local: Flow.Memory = .empty;
+        try local.put(temporary, cell, .{ .scalar = .{ .zero = .int } });
+        try e.invalidateMutableFacts(&local);
+        promoted = try local.promote(temporary, a);
+    }
+    const before = trace.metrics.callback_fact_cells_scanned;
+    try e.invalidateMutableFacts(&promoted);
+    try std.testing.expectEqual(before, trace.metrics.callback_fact_cells_scanned);
+    try std.testing.expect(promoted.get(cell).?.scalar == .unknown);
+}
+
+test "callback mutable facts invalidate known entries introduced by memory joins" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var trace = factReporter();
+    var e = try factEngine(a, &trace);
+    for ([_]bool{ false, true }) |owned| for ([_]bool{ false, true }) |nonempty| {
+        var target: Flow.Memory = .empty;
+        if (nonempty) try target.put(a, .{ .object = 1, .field = 2 }, .{ .scalar = .unknown });
+        try e.invalidateMutableFacts(&target);
+        var source: Flow.Memory = .empty;
+        const cell: Flow.Cell = .{ .object = 1, .field = 0 };
+        try source.put(a, cell, .{ .scalar = .{ .boolean = true } });
+        if (owned) {
+            _ = try Flow.joinMemoryOwned(a, &target, source);
+        } else {
+            _ = try Flow.joinMemory(a, &target, source);
+        }
+        var expected = target;
+        try invalidateFactsOracle(&e, &expected);
+        try e.invalidateMutableFacts(&target);
+        try expectSameFacts(expected, target);
+        try std.testing.expect(target.get(cell).?.scalar == .unknown);
+    };
+}
 
 test "callback provenance preserves lexical regions through binary IR restoration" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

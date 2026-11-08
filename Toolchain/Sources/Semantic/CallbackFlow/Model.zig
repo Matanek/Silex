@@ -139,6 +139,9 @@ pub const Value = struct {
     pub fn eql(a: Value, b: Value) bool {
         return std.mem.eql(usize, a.nodes, b.nodes) and Scalar.eql(a.scalar, b.scalar) and a.unknown_callable == b.unknown_callable and a.no_return == b.no_return and a.presence == b.presence and a.reference_domain == b.reference_domain;
     }
+    pub fn hasKnownControl(self: Value) bool {
+        return (self.scalar != .bottom and self.scalar != .unknown) or self.presence == .absent or self.presence == .present;
+    }
     pub fn controlEqual(a: Value, b: Value) ?bool {
         if (a.presence != .bottom or b.presence != .bottom) {
             if (a.presence == .absent) return switch (b.presence) {
@@ -245,9 +248,12 @@ pub const Owner = struct {
 pub const Memory = struct {
     cells: Store(Cell, Value) = .empty,
     owners: Store(usize, Owner) = .empty,
+    // Snapshot-local proof, not a remembered arena address. A known write
+    // invalidates it even when the cell later turns out to be immutable.
+    mutable_facts_invalidated: bool = false,
     pub const empty: Memory = .{};
     pub fn promote(self: Memory, from: Allocator, to: Allocator) !Memory {
-        return .{ .cells = try self.cells.promote(from, to), .owners = try self.owners.promote(from, to) };
+        return .{ .cells = try self.cells.promote(from, to), .owners = try self.owners.promote(from, to), .mutable_facts_invalidated = self.mutable_facts_invalidated };
     }
 
     pub fn get(self: Memory, key: Cell) ?Value {
@@ -255,6 +261,7 @@ pub const Memory = struct {
     }
     pub fn put(self: *Memory, a: Allocator, key: Cell, value: Value) !void {
         try self.cells.put(a, key, value);
+        if (value.hasKnownControl()) self.mutable_facts_invalidated = false;
     }
     pub fn iterator(self: *const Memory) Store(Cell, Value).Iterator {
         return self.cells.iterator();
@@ -279,6 +286,7 @@ pub fn joinMemory(a: Allocator, target: *Memory, source: Memory) !bool {
     if (target.cells.root == null) {
         changed = source.cells.root != null;
         target.cells = source.cells;
+        target.mutable_facts_invalidated = source.mutable_facts_invalidated;
     } else if (target.cells.root != source.cells.root) {
         var it = source.cells.changedSince(target.cells);
         while (it.next()) |item| {
