@@ -1519,4 +1519,3 @@ jobs:
           sh .github/scripts/smoke-native-memory.sh \
             "$RUNNER_TEMP/silex-prefix/bin/silex.exe" \
             "$RUNNER_TEMP/signed-storage"
-
