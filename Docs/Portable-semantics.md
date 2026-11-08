@@ -95,6 +95,21 @@ a nested loan or another captured environment is still checked independently and
 in its concrete callers when needed. It avoids interpreting unrelated application
 setup merely to prove that a direct synchronous argument was never retained.
 
+A separate confinement proof can discharge an input-free void origin whose
+borrowed lifetimes all end without surviving bindings. No global may carry its
+loan. The proof closes direct, dynamic, referenced and applicable finalizer calls,
+then follows external addresses and references to potential loan carriers through
+arguments, captures, locals and returns. Opaque carrier imports, projections from
+external addresses, native carrier exports and capability-changing conversions
+retain the complete interpretation. Address slots that can be overwritten through
+aliases remain external when loaded. Raw extraction or numeric conversion of a carrier address retains the complete
+analysis. Opaque callable producers and reference-mode ambiguities also keep the
+general solver. Native direct and indirect calls share the same carrier checks;
+an indirect native callee must also be free of loan-address taint. Address-free callback aliases share carrier capabilities, while
+reference modes retain their distinct indices; indirect argument propagation
+accounts for structurally equivalent interfaces. This is a sufficient lifetime proof, not a
+synchronous contract for foreign code; other lexical origins are still checked.
+
 Each remaining lexical origin is first checked with abstract external inputs. Its domain
 closes the loan signatures, callable interfaces that accept or return their
 carriers, referenced callable effects, aggregate containment and finalizers
@@ -117,19 +132,61 @@ storage cleared while the binding is alive remain valid when the analysis can
 prove their lifetime. Unconstrained compatible class inputs may alias; an
 uncertain overwrite does not erase a possible retained callback.
 
-The ownership interpretation preserves exact Boolean constants and payload-free
-enum variants in immutable values and fields. Mutable local storage, container
-elements, lazily projected inputs and globals keep unknown control contents.
-Another call cannot invalidate an immutable fact through a legal mutable alias;
-replacing a containing owner still follows the ordinary object/address transfer.
-Divergent facts join to unknown, so loops have a finite control lattice. Unmodeled
-scalar results and external inputs are unknown. Returned addresses remain
-relevant even when their lowered signature contains no callable value.
+The ownership interpretation preserves Boolean constants, payload-free enum
+variants and typed numeric zero in immutable environments and concrete internal
+storage. Plain control records are represented even without callable fields.
+Unconstrained aliases and external inputs remain unknown; opaque notifications
+invalidate mutable control and presence facts. Direct and indirect native calls
+and raw address stores invalidate those facts as well. Distinct numeric facts widen to
+unknown rather than introducing an unbounded numeric context domain. Known enum
+tags form finite sets. Returned addresses remain relevant even when their lowered
+signature contains no callable value.
 Deep copies preserve known and unknown control facts. A skipped transfer returns
 an unknown scalar before callable targets join; it is not an unreachable return
 that could disappear beside a known target. Only a known Boolean selects one CFG
 successor. This avoids an impossible real-time scheduling branch for a known
 controlled driver, without rewriting IR or suppressing an unknown path.
+
+Protocol boxes preserve known concrete dispatch tags. A boxed class uses its
+actual allocation type rather than its static base; external and mixed dynamic
+shapes stay unknown. Joins keep finite sets of known enum/protocol tags. A branch
+on a tag refines both successors, including the residual alternatives in a
+protocol dispatch chain. Tag equality alone never proves protocol payload equality.
+
+Optional presence has a finite absent/present/unknown domain, distinct from
+uninitialized storage and paths without a normal return. Null tests preserve
+known absence without visiting impossible payload dispatches. Unwrapping known
+absence has no normal successor; unknown or nested optional payloads remain
+conservative. Copies and joins preserve presence, and modeled optional-reference
+writes remain relevant even for scalar conditions. Opaque calls invalidate mutable
+presence facts together with protocol tags; immutable facts remain stable.
+
+Locals without an outside alias live in invocation state, independently of
+recursive calls. Address uses are proved closed only for loads, targeted stores,
+ownership tests and class-field projections; captures, forwarding, address masking,
+returns and unknown uses retain shared cells. Concrete
+protocol storage can preserve its dispatch facts across modeled writes; opaque
+calls invalidate mutable protocol facts. Unknown callable alternatives remain
+explicit through copies, optional values and external collections. Opaque carrier
+results are external graphs, never evidence that a receiver is absent. A path
+with no possible receiver or callable has no normal return. Unknown native loads
+and conversions remain opaque; this proof does not execute foreign effects.
+
+Repeated sites are determined by real CFG cycles, not backward block numbering.
+Recursive contexts preserve identities belonging to the finite universe at an
+ancestor's entry independently for each argument node. A fresh path argument
+does not merge other pre-existing receivers. Fresh identities widen nominally
+before allocation can grow without bound. Class receiver alternatives start from
+separate entry states. Certified generated resource helpers use structural recursive
+contexts; user destructors retain ordinary identity-sensitive invocation. Context keys otherwise contain only
+finite nominal types and control facts. These refinements change only ownership
+validation, not emitted IR or runtime dispatch.
+
+Known collection edits preserve element positions and cardinality; unknown edits
+retain conservative element unions. Strict generated-style retain/drop loops over
+known collections execute each element transfer in order. Other loops keep the
+general fixpoint analysis. Reference root/edge domains follow the portable IR and
+remain unknown when joined with an unknown reference.
 
 Finalizer effects participate through the explicit root/edge ownership IR.
 A receiver still owned by its caller is not finalized at a helper return.

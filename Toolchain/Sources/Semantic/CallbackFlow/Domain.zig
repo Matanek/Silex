@@ -5,8 +5,33 @@ const A = std.mem.Allocator;
 
 pub const Domain = struct { capable: M.Capabilities, relevant: []const bool, generators: []const bool };
 
+fn controlType(p: Ir.Program, t: Ir.Type) bool {
+    return t.optionalChild() != null or M.scalarType(p, t);
+}
+const Analysis = struct { capable: M.Capabilities, effects: []const bool };
+pub fn loanCapabilities(a: A, p: Ir.Program, source: usize) !M.Capabilities {
+    return (try analyze(a, p, source, false)).capable;
+}
 pub fn forOrigin(a: A, p: Ir.Program, source: usize) !Domain {
+    const result = try analyze(a, p, source, true);
+    return .{ .capable = result.capable, .relevant = try relevantFunctions(a, p, result.capable), .generators = try generatingFunctions(a, p, result.capable, result.effects) };
+}
+fn analyze(a: A, p: Ir.Program, source: usize, controls: bool) !Analysis {
     const capable = try M.emptyTypes(a, p);
+    // Plain control records can decide whether a later loan is retained, even
+    // though none of their fields can itself carry a callable environment.
+    if (controls) for (p.structures, 0..) |structure, i| for (structure.fields) |field| {
+        var t = field.type;
+        if (t.optionalChild()) |child| t = child;
+        if (!t.isNumeric() and M.scalarType(p, t)) capable.structures[i] = true;
+    };
+    // Nullable references can change the control facts that guard a loan.
+    for (p.function_types, 0..) |signature, i| {
+        if (signature.return_type == .address and (if (controls) controlType(p, signature.logical_return_type) else signature.logical_return_type.optionalChild() != null)) capable.functions[i] = true;
+        for (signature.parameter_types, 0..) |t, n| if (t == .address and n < signature.logical_parameter_types.len and (if (controls) controlType(p, signature.logical_parameter_types[n]) else signature.logical_parameter_types[n].optionalChild() != null)) {
+            capable.functions[i] = true;
+        };
+    }
     const origin = p.functions[source];
     for (origin.blocks) |b| for (b.instructions) |op| if (op == .function_reference) {
         for (op.function_reference.captures) |capture| if (origin.value_types[capture] == .address) {
@@ -52,7 +77,7 @@ pub fn forOrigin(a: A, p: Ir.Program, source: usize) !Domain {
         };
         if (!changed) break;
     }
-    return .{ .capable = capable, .relevant = try relevantFunctions(a, p, capable), .generators = try generatingFunctions(a, p, capable, effects) };
+    return .{ .capable = capable, .effects = effects };
 }
 
 // Effects on globals must keep concrete callable targets even for a zero-arg
@@ -104,7 +129,20 @@ fn relevantFunctions(a: A, p: Ir.Program, capable: M.Capabilities) ![]bool {
     const result = try a.alloc(bool, p.functions.len);
     @memset(result, false);
     for (p.functions, 0..) |f, i| {
-        result[i] = f.return_type == .address;
+        result[i] = f.return_type == .address or controlType(p, f.return_type);
+        for (f.blocks) |block| for (block.instructions) |op| if (op == .reference_store and controlType(p, f.value_types[op.reference_store.operand])) {
+            result[i] = true;
+        };
+        for (f.blocks) |block| for (block.instructions) |op| if (op == .reference_load and controlType(p, f.value_types[op.reference_load.result])) {
+            result[i] = true;
+        };
+        // Native effects can change a control through an erased address, or
+        // through storage exposed by an earlier call. Its scalar type need
+        // not occur in this helper's lowered values.
+        for (f.blocks) |block| for (block.instructions) |op| switch (op) {
+            .boundary_call, .boundary_indirect_call, .address_store => result[i] = true,
+            else => {},
+        };
         for (f.value_types) |t| if (M.capable(capable, t)) {
             result[i] = true;
             break;
@@ -139,8 +177,9 @@ fn relevantFunctions(a: A, p: Ir.Program, capable: M.Capabilities) ![]bool {
 fn generatingFunctions(a: A, p: Ir.Program, capable: M.Capabilities, effects: []const bool) ![]bool {
     const flags = try a.alloc(bool, p.functions.len);
     for (p.functions, 0..) |f, i| {
-        flags[i] = effects[i] or f.return_type == .address or M.capable(capable, f.return_type);
+        flags[i] = effects[i] or f.return_type == .address or controlType(p, f.return_type) or M.capable(capable, f.return_type);
         for (f.blocks) |b| for (b.instructions) |op| switch (op) {
+            .boundary_call, .boundary_indirect_call, .address_store => flags[i] = true,
             .function_reference => |v| {
                 var lexical = false;
                 for (v.captures) |capture| lexical = lexical or f.value_types[capture] == .address;
@@ -150,7 +189,7 @@ fn generatingFunctions(a: A, p: Ir.Program, capable: M.Capabilities, effects: []
             },
             inline .structure_init, .enum_init, .list_init => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.result]),
             .field_store => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.replacement]),
-            .reference_store => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.operand]),
+            .reference_store => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.operand]) or controlType(p, f.value_types[v.operand]),
             .collection_replace => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.replacement]),
             .list_edit => |v| if (v.argument) |argument| {
                 flags[i] = flags[i] or M.capable(capable, f.value_types[argument]);

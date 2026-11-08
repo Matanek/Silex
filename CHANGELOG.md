@@ -8,9 +8,13 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The compiler proves capture confinement in an input-free void root when bindings expire without surviving values and no global, opaque import, or native recipient can carry the loan. Other cases retain the complete ownership analysis. Recursive contexts distinguish pre-existing receivers, addressed locals with no outside aliases remain invocation-private, and known collections retain their elements and resource counts. Concrete control flags and typed numeric zero exclude proven impossible paths; opaque calls, native calls, and raw stores invalidate mutable facts. Emitted code and the capture contract remain unchanged.
+
+- Borrow analysis preserves known protocol, enum and optional-presence alternatives, then refines them in each branch. It distinguishes an absent target from an unknown function, materializes opaque carrier results, and retains unknown alternatives through copies and external collections. Writes through optional references remain analyzed even when they only change a scalar condition. Unaddressed locals remain private to each invocation, and control-flow cycles are checked directly. Objects present at invocation entry retain their identity in recursive contexts; a new identity restores finite nominal widening. Emitted code, the ABI, and the borrowed-capture contract remain unchanged.
+
 - The compiler proves direct non-retaining uses of borrowed callbacks before interpreting application ownership. Direct forwarding between helpers is covered; storage, returns, copies, missing bodies, lifetimes, and unproven indirect forwarding retain the full analysis. Other borrows created inside the callback are still checked, without changing emitted code or the ABI.
 
-- Borrow analysis preserves known booleans and payload-free variants in immutable values to exclude statically impossible paths. Mutable storage contents and unknown inputs remain unknown. Copies preserve these facts, and an unanalyzed return remains unknown in a union of callbacks. Emitted code and the ABI remain unchanged.
+- Borrow analysis preserves known booleans and payload-free variants in immutable values to exclude statically impossible paths. External inputs and aliases remain unknown; opaque calls invalidate mutable facts in concrete objects. Copies preserve these facts, and an unanalyzed return remains unknown in a union of callbacks. Emitted code and the ABI remain unchanged.
 
 - Drawing-borrow validation distinguishes captures, global effects, and local creation to limit traversal to relevant callbacks. Logical reference types are preserved in IR and caches; returns, writes, and owners remain tracked.
 

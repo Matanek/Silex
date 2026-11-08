@@ -5,6 +5,14 @@ test {
     _ = @import("Sources/CallbackProvenanceTests.zig");
     _ = @import("Sources/CallbackCacheTests.zig");
     _ = @import("Sources/CallbackImmediateTests.zig");
+    _ = @import("Sources/CallbackProtocolTests.zig");
+    _ = @import("Sources/CallbackUnknownTests.zig");
+    _ = @import("Sources/CallbackContextTests.zig");
+    _ = @import("Sources/CallbackReferenceTests.zig");
+    _ = @import("Sources/CallbackClosedRootTests.zig");
+    _ = @import("Sources/CallbackLocalTests.zig");
+    _ = @import("Sources/CallbackChoiceTests.zig");
+    _ = @import("Sources/CallbackReachabilityTests.zig");
     _ = @import("Sources/CallbackTests.zig");
     _ = @import("Sources/Llvm/DebugPipeline.zig");
     _ = @import("Tools/LlvmEvaluation/BoundaryPolicy.zig");

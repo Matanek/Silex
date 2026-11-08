@@ -3,7 +3,9 @@ const Ir = @import("../Ir.zig");
 const Source = @import("../Source.zig");
 const M = @import("CallbackFlow/Model.zig");
 const Finalization = @import("CallbackFlow/Finalization.zig");
+const Refine = @import("CallbackFlow/Refine.zig");
 const Machine = @import("CallbackFlow/Transfer.zig");
+const ResourceLoops = @import("CallbackFlow/ResourceLoops.zig");
 const A = std.mem.Allocator;
 const Value = M.Value;
 
@@ -24,12 +26,22 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
     // No lexical loan can originate in this program. Protocols and object
     // cycles alone do not require callback ownership interpretation.
     if (!any) return null;
+    const predicates = try Refine.program(a, program);
+    const looping_blocks = try @import("CallbackFlow/Loops.zig").program(a, program);
+    const resource_loops = try ResourceLoops.program(a, program);
+    const cleanup_functions = try @import("CallbackFlow/Cleanup.zig").program(a, program);
     const immediate = try @import("CallbackFlow/Immediate.zig").origins(a, program);
     for (program.functions, 0..) |_, source| {
         if (!borrowed[source] or immediate[source]) continue;
         var partition = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer partition.deinit();
         const owned = partition.allocator();
+        if (@import("CallbackFlow/ClosedRoot.zig").eligible(program, source)) {
+            const loans = try @import("CallbackFlow/Domain.zig").loanCapabilities(owned, program, source);
+            if (try @import("CallbackFlow/ClosedRoot.zig").proven(owned, program, loans, source)) {
+                continue;
+            }
+        }
         const domain = try @import("CallbackFlow/Domain.zig").forOrigin(owned, program, source);
         const capable = domain.capable;
         const relevant = domain.relevant;
@@ -44,7 +56,7 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
                 if (pass == 1 and (root == source or (!f.is_test_entry and !std.mem.eql(u8, f.name, "main")))) continue;
                 var local = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer local.deinit();
-                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators };
+                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators, .looping_blocks = looping_blocks, .predicates = predicates, .cleanup_functions = cleanup_functions, .resource_loops = resource_loops };
                 const globals = try engine.object(0, .local, M.wildcard, null, false);
                 engine.globals = globals;
                 var state: M.Memory = .empty;
@@ -75,12 +87,18 @@ pub const Engine = struct {
     globals: usize = 0,
     diagnostic: ?Source.Diagnostic = null,
     needs_context: bool = false,
+    predicates: []const []const ?Refine.Predicate = &.{},
+    looping_blocks: []const []const bool = &.{},
+
+    cleanup_functions: []const bool = &.{},
+    resource_loops: []const []const ?ResourceLoops.Plan = &.{},
 
     pub fn node(self: *Engine, site: M.Site, node_value: M.Node) A.Error!usize {
         if (self.sites.get(site)) |id| {
             switch (self.nodes.items[id]) {
                 .object => |*o| {
                     o.many = o.many or node_value.object.many;
+                    if (o.length != node_value.object.length) o.length = null;
                     if (o.unknown_parent == null) o.unknown_parent = node_value.object.unknown_parent;
                 },
                 .callable => |*c| {
@@ -106,33 +124,76 @@ pub const Engine = struct {
         return id;
     }
     pub fn object(self: *Engine, frame: usize, category: M.Category, site: usize, t: ?Ir.Type, repeated: bool) A.Error!usize {
-        return self.node(.{ .frame = frame, .category = category, .value = site }, .{ .object = .{ .type = t, .many = repeated } });
+        return self.objectWithLength(frame, category, site, t, repeated, null);
+    }
+    pub fn objectWithLength(self: *Engine, frame: usize, category: M.Category, site: usize, t: ?Ir.Type, repeated: bool, length: ?usize) A.Error!usize {
+        return self.node(.{ .frame = frame, .category = category, .value = site }, .{ .object = .{ .type = t, .many = repeated, .length = length } });
+    }
+    pub fn collectionLength(self: *Engine, value: Value) ?usize {
+        if (value.nodes.len == 0) return null;
+        var length: ?usize = null;
+        for (value.nodes) |id| {
+            const n = self.nodes.items[id];
+            if (n != .object) return null;
+            var current = n.object.length;
+            if (current == null) if (n.object.type) |t| if (t.structureIndex()) |i| if (self.program.structures[i].collection) |collection| {
+                current = collection.length;
+            };
+            const known = current orelse return null;
+            if (length != null and length.? != known) return null;
+            length = known;
+        }
+        return length;
     }
     pub fn address(self: *Engine, cell: M.Cell) A.Error!Value {
         const id = try self.node(.{ .frame = cell.object, .category = .address, .value = cell.field }, .{ .address = cell });
-        return Value.one(self.a, id);
+        var result = try Value.one(self.a, id);
+        result.reference_domain = .unknown;
+        return result;
     }
     pub fn many(self: *Engine, id: usize) bool {
-        return switch (self.nodes.items[id]) {
-            .object => |o| o.many,
-            .callable => |c| c.many,
-            .address => false,
-        };
+        var current = id;
+        for (0..self.nodes.items.len + 1) |_| {
+            switch (self.nodes.items[current]) {
+                .object => |o| {
+                    if (o.many) return true;
+                    current = o.unknown_parent orelse return false;
+                },
+                .callable => |c| return c.many,
+                .address => return false,
+            }
+        }
+        return true; // A cyclic unknown shape is a summary, never a unique instance.
     }
     pub fn write(self: *Engine, memory: *M.Memory, cell: M.Cell, input: Value, strong: bool) A.Error!void {
         var value = input;
         const destination = self.nodes.items[cell.object];
-        // Control facts are retained only in immutable storage. SSA values
-        // and by-value callable captures cannot change through another call;
-        // mutable locals, container elements and lazily projected inputs can.
+        // Immutable environments and concrete internal objects retain known
+        // controls. Unknown aliases remain conservative; opaque notifications
+        // invalidate mutable facts before subsequent reads.
         var immutable = destination == .callable;
         if (destination == .object and !destination.object.external) {
             if (destination.object.type) |t| if (t.structureIndex()) |index| {
                 const fields = self.program.structures[index].fields;
-                if (cell.field < fields.len) immutable = !fields[cell.field].mutable;
+                if (cell.field < fields.len) {
+                    immutable = !fields[cell.field].mutable;
+                    if (value.scalar.isProtocol() and destination.object.unknown_parent == null and self.program.structures[index].is_class and M.protocolType(self.program, fields[cell.field].type)) immutable = true;
+                }
             };
         }
-        if (!immutable and value.scalar != .bottom) value.scalar = .unknown;
+        if (!immutable and destination == .object and !destination.object.external and value.scalar.isProtocol()) {
+            if (destination.object.type) |t| if (t.structureIndex()) |index| {
+                if (self.program.structures[index].collection) |collection| {
+                    immutable = M.protocolType(self.program, collection.element) and M.capable(self.capable, collection.element);
+                }
+            };
+        }
+        var keep_presence = immutable;
+        if (destination == .object and !destination.object.external and destination.object.type != null) keep_presence = true;
+        if (cell.object == self.globals and cell.field < self.program.globals.len and M.capable(self.capable, self.program.globals[cell.field].type)) keep_presence = true;
+        if (!keep_presence and value.presence != .bottom) value.presence = .unknown;
+        const concrete_control = destination == .object and !destination.object.external and destination.object.type != null;
+        if (!immutable and !concrete_control and value.scalar != .bottom) value.scalar = .unknown;
         if (strong and !self.many(cell.object)) try memory.put(self.a, cell, value) else try memory.put(self.a, cell, try Value.join(memory.get(cell) orelse .{}, value, self.a));
         // Distinct unconstrained class inputs may denote the same instance.
         // A write through one input is therefore a possible write through each
@@ -163,10 +224,15 @@ pub const Engine = struct {
         // fresh unknown object with arbitrary aliases and finalizers.
         const owner = self.nodes.items[cell.object];
         if (cell.object != self.globals and (owner != .object or owner.object.unknown_parent == null)) return .{};
-        if (t.optionalChild()) |child| return self.unknown(memory, cell, child);
-        var value: Value = if (M.scalarType(self.program, t)) .{ .scalar = .unknown } else .{};
+        if (t.optionalChild()) |child| {
+            var value = try self.unknown(memory, cell, child);
+            value.presence = .unknown;
+            try memory.put(self.a, cell, value);
+            return value;
+        }
+        var value: Value = M.unknownValue(self.program, t);
         if (t == .address) {
-            const holder = try self.node(.{ .frame = cell.object, .category = .unknown, .value = cell.field }, .{ .object = .{ .type = null, .many = false, .unknown_parent = cell.object, .external = true } });
+            const holder = try self.node(.{ .frame = cell.object, .category = .unknown, .value = cell.field }, .{ .object = .{ .type = null, .many = cell.field == M.wildcard or self.many(cell.object), .unknown_parent = cell.object, .external = true } });
             value = try self.address(.{ .object = holder, .field = 0 });
         } else if (t.structureIndex() != null and M.capable(self.capable, t)) {
             // Unknown recursive object graphs fold back only at a repeated type.
@@ -183,7 +249,7 @@ pub const Engine = struct {
                 parent = n.object.unknown_parent;
             }
             if (value.nodes.len == 0) {
-                const id = try self.node(.{ .frame = cell.object, .category = .unknown, .value = cell.field }, .{ .object = .{ .type = t, .many = false, .unknown_parent = cell.object, .external = true } });
+                const id = try self.node(.{ .frame = cell.object, .category = .unknown, .value = cell.field }, .{ .object = .{ .type = t, .many = cell.field == M.wildcard or self.many(cell.object), .unknown_parent = cell.object, .external = true } });
                 value = try Value.one(self.a, id);
                 try Finalization.initializeUnknown(self, memory, id, cell.object == self.globals);
                 // A lazily discovered external field may alias an input that
@@ -219,9 +285,15 @@ pub const Engine = struct {
         }
         return result;
     }
-    pub fn elements(self: *Engine, memory: M.Memory, base: Value) A.Error!Value {
+    pub fn elements(self: *Engine, memory: *M.Memory, base: Value) A.Error!Value {
         var result: Value = .{};
         for (base.nodes) |object_value| {
+            const node_value = self.nodes.items[object_value];
+            if (node_value == .object and node_value.object.unknown_parent != null) {
+                if (node_value.object.type) |t| if (t.structureIndex()) |index| {
+                    if (self.program.structures[index].collection) |collection| _ = try self.unknown(memory, .{ .object = object_value, .field = M.wildcard }, collection.element);
+                };
+            }
             var it = memory.fields(object_value);
             while (it.next()) |entry| result = try Value.join(result, entry.value_ptr.*, self.a);
         }
@@ -244,10 +316,12 @@ pub const Engine = struct {
         const frame = try self.storage.create(M.Frame);
         const repeated = if (parent) |caller| self.repeatedCall(caller, site) else false;
         frame.* = .{ .function = function, .parent = parent, .site = site, .repeated = repeated, .locals = try self.object(id, .local, 0, null, repeated) };
+        frame.unaliased_locals = try @import("CallbackFlow/Locals.zig").privateCells(self.storage, self.program, function);
         try self.frames.append(self.storage, frame);
         return id;
     }
     pub fn invoke(self: *Engine, parent: usize, site: usize, function: usize, arguments: []const Value, memory: *M.Memory) A.Error!Value {
+        if (!self.callReachable(function, arguments)) return .{ .no_return = true };
         if (!self.relevant[function]) return self.unknownReturn(function);
         // A non-generating transfer cannot manufacture relevant state from
         // empty inputs. External shape alone is not data; a known callable or
@@ -270,7 +344,7 @@ pub const Engine = struct {
         var ancestor: ?usize = parent;
         while (ancestor) |id| {
             const frame = self.frames.items[id];
-            if (frame.function == function and frame.active) {
+            if (frame.function == function and frame.active and @import("CallbackFlow/Shape.zig").arguments(self, frame.arguments, arguments, if (self.cleanup_functions.len == self.program.functions.len and self.cleanup_functions[function]) 0 else frame.context_boundary)) {
                 if (!frame.recursive) {
                     frame.recursive = true;
                     var sites = self.sites.iterator();
@@ -288,10 +362,13 @@ pub const Engine = struct {
                 }
                 for (frame.arguments, arguments) |*value, input| {
                     const joined = try Value.join(value.*, try input.own(frame.allocator), frame.allocator);
-                    frame.changed = !Value.eql(joined, value.*) or frame.changed;
+                    if (!Value.eql(joined, value.*)) {
+                        frame.changed = true;
+                    }
                     value.* = joined;
                 }
-                frame.changed = try M.joinMemoryOwned(frame.allocator, &frame.incoming, memory.*) or frame.changed;
+                const input_changed = try M.joinMemoryOwned(frame.allocator, &frame.incoming, memory.*);
+                frame.changed = input_changed or frame.changed;
                 _ = try M.joinMemory(self.a, memory, frame.output);
                 return frame.returned;
             }
@@ -303,14 +380,42 @@ pub const Engine = struct {
         };
         return self.evaluate(try self.newFrame(function, parent, site), arguments, memory);
     }
+    pub fn callReachable(self: *Engine, function: usize, arguments: []const Value) bool {
+        const f = self.program.functions[function];
+        for (arguments, 0..) |argument, i| {
+            if (argument.no_return) return false;
+            const t = f.value_types[i];
+            if (t.optionalChild() != null or !M.capable(self.capable, t)) continue;
+            const index = t.structureIndex() orelse continue;
+            if (self.program.structures[index].is_class and argument.nodes.len == 0) return false;
+        }
+        return true;
+    }
+    pub fn unknownResult(self: *Engine, parent: usize, site: usize, t: Ir.Type, memory: *M.Memory) A.Error!Value {
+        if (t != .address and !M.capable(self.capable, t)) return M.unknownValue(self.program, t);
+        const marker = try self.object(parent, .call_result, site, t, true);
+        var max_inputs: usize = 0;
+        for (self.program.functions) |f| max_inputs = @max(max_inputs, f.capture_types.len + f.parameter_types.len);
+        const cell: M.Cell = .{ .object = self.globals, .field = self.program.globals.len + max_inputs + marker + 1 };
+        const value = try self.unknown(memory, cell, t);
+        for (value.nodes) |id| switch (self.nodes.items[id]) {
+            .object => |*o| o.many = true,
+            else => {},
+        };
+        return value;
+    }
     fn unknownReturn(self: *Engine, function: usize) Value {
         // A skipped transfer is not an unreachable return. In a union of
         // callable targets, it must not become the identity for a known fact.
-        return if (M.scalarType(self.program, self.program.functions[function].return_type)) .{ .scalar = .unknown } else .{};
+        return M.unknownValue(self.program, self.program.functions[function].return_type);
+    }
+    pub fn inLoop(self: *Engine, function: usize, block: usize) bool {
+        if (self.looping_blocks.len == self.program.functions.len) return self.looping_blocks[function][block];
+        return Machine.inLoop(self.program.functions[function], block);
     }
     fn repeatedCall(self: *Engine, parent: usize, site: usize) bool {
         const caller = self.frames.items[parent];
-        return caller.recursive or caller.repeated or Machine.inLoop(self.program.functions[caller.function], site >> 32);
+        return caller.recursive or caller.repeated or self.inLoop(caller.function, site >> 32);
     }
     fn repeatFrame(self: *Engine, id: usize) void {
         self.frames.items[id].repeated = true;
@@ -327,6 +432,7 @@ pub const Engine = struct {
         }
     }
     fn hasData(self: *Engine, value: Value, memory: M.Memory, visited: *std.AutoHashMapUnmanaged(usize, void)) A.Error!bool {
+        if (value.presence == .absent or value.presence == .present or (value.scalar != .bottom and value.scalar != .unknown)) return true;
         for (value.nodes) |id| {
             if (visited.contains(id)) continue;
             try visited.put(self.a, id, {});
@@ -342,9 +448,29 @@ pub const Engine = struct {
         }
         return false;
     }
+    pub fn invalidateMutableFacts(self: *Engine, memory: *M.Memory) A.Error!void {
+        var it = memory.iterator();
+        while (it.next()) |entry| {
+            if ((entry.value_ptr.scalar == .bottom or entry.value_ptr.scalar == .unknown) and entry.value_ptr.presence != .absent and entry.value_ptr.presence != .present) continue;
+            const owner = self.nodes.items[entry.key_ptr.object];
+            if (owner == .callable) continue;
+            if (owner == .object) {
+                if (owner.object.type) |t| if (t.structureIndex()) |index| {
+                    const fields = self.program.structures[index].fields;
+                    if (self.program.structures[index].collection == null and entry.key_ptr.field < fields.len and !fields[entry.key_ptr.field].mutable) continue;
+                };
+            }
+            if (entry.key_ptr.object == self.globals and entry.key_ptr.field < self.program.globals.len and !self.program.globals[entry.key_ptr.field].mutable) continue;
+            var value = entry.value_ptr.*;
+            if (value.scalar != .bottom) value.scalar = .unknown;
+            if (value.presence != .bottom) value.presence = .unknown;
+            try memory.put(self.a, entry.key_ptr.*, value);
+        }
+    }
     pub fn indirect(self: *Engine, parent: usize, site: usize, callee: Value, arguments: []const Value, return_type: Ir.Type, memory: *M.Memory) A.Error!Value {
-        var returned: Value = .{};
+        var returned: Value = .{ .no_return = true };
         var merged: M.Memory = .empty;
+        const incoming = memory.*;
         var any = false;
         for (callee.nodes) |id| {
             const node_value = self.nodes.items[id];
@@ -355,12 +481,20 @@ pub const Engine = struct {
             const inputs = try self.a.alloc(Value, function.capture_types.len + arguments.len);
             for (0..function.capture_types.len) |index| inputs[index] = branch.get(.{ .object = id, .field = index }) orelse .{};
             @memcpy(inputs[function.capture_types.len..], arguments);
-            returned = try Value.join(returned, try self.invoke(parent, site, node_value.callable.function, inputs, &branch), self.a);
-            _ = try M.joinMemory(self.a, &merged, branch);
+            const output = try self.invoke(parent, site, node_value.callable.function, inputs, &branch);
+            returned = try Value.join(returned, output, self.a);
+            if (!output.no_return) _ = try M.joinMemory(self.a, &merged, branch);
         }
         if (any) {
             memory.* = merged;
-        } else {
+        }
+        if (callee.unknown_callable) {
+            if (any) {
+                _ = try M.joinMemory(self.a, &merged, incoming);
+                memory.* = merged;
+            }
+            try self.invalidateMutableFacts(memory);
+            returned = try Value.join(returned, try self.unknownResult(parent, site, return_type, memory), self.a);
             // An opaque call can expose its inputs or produce a capability
             // used later. Even a zero-argument void call can observe a live
             // loan through globals or a creator's external inputs.
@@ -402,12 +536,14 @@ pub const Engine = struct {
         return false;
     }
     fn evaluate(self: *Engine, id: usize, arguments: []const Value, memory: *M.Memory) A.Error!Value {
+        const frame = self.frames.items[id];
+        frame.context_boundary = self.nodes.items.len;
         var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer scratch.deinit();
         const caller_allocator = self.a;
         self.a = scratch.allocator();
         defer self.a = caller_allocator;
-        const frame = self.frames.items[id];
+
         frame.allocator = self.a;
         defer {
             frame.arguments = &.{};
@@ -419,61 +555,124 @@ pub const Engine = struct {
         frame.arguments = try self.a.dupe(Value, arguments);
         frame.incoming = try M.cloneMemory(self.a, memory.*);
         frame.output = .empty;
-        frame.returned = .{};
+        frame.returned = .{ .no_return = true };
         frame.active = true;
         defer frame.active = false;
         while (true) {
             frame.changed = false;
             const f = self.program.functions[frame.function];
-            const entries = try self.a.alloc(?M.State, f.blocks.len);
-            @memset(entries, null);
-            var initial: M.State = .{ .memory = try M.cloneMemory(self.a, frame.incoming) };
-            for (frame.arguments, 0..) |argument, index| try initial.set(self.a, index, argument);
-            entries[0] = initial;
-            const pending = try self.a.alloc(bool, f.blocks.len);
-            @memset(pending, false);
-            pending[0] = true;
-            while (true) {
-                var processed = false;
-                for (f.blocks, 0..) |block, block_id| {
-                    if (!pending[block_id]) continue;
-                    pending[block_id] = false;
-                    processed = true;
-                    const entry = entries[block_id].?;
-                    var state = try entry.clone(self.a);
-                    for (0..block.instructions.len + 1) |index| {
-                        for (f.borrow_ends) |end| if (end.block == block_id and end.instruction == index) try self.scopeEnd(id, end, &state);
-                        if (self.diagnostic != null) return .{};
-                        if (index < block.instructions.len) try Machine.step(self, id, block_id, index, block.instructions[index], &state);
-                        if (self.diagnostic != null) return .{};
-                    }
-                    switch (block.terminator) {
-                        .return_value, .return_void => {
-                            const output: Value = if (block.terminator == .return_value) state.get(block.terminator.return_value) else .{};
-                            if (block.terminator == .return_value and M.capable(self.capable, f.return_type)) try self.escape(id, null, output, state.memory, block.terminator_position, true);
-                            try self.externals(id, null, &state, block.terminator_position);
-                            const joined = try Value.join(frame.returned, output, self.a);
-                            frame.changed = !Value.eql(joined, frame.returned) or frame.changed;
-                            frame.returned = joined;
-                            frame.changed = try M.joinMemory(self.a, &frame.output, state.memory) or frame.changed;
-                        },
-                        .jump => |target| if (try self.joinEntry(&entries[target], state)) {
-                            pending[target] = true;
-                        },
-                        .branch => |branch| {
-                            const condition = state.get(branch.condition).scalar;
-                            if ((condition != .boolean or condition.boolean) and try self.joinEntry(&entries[branch.then_block], state)) pending[branch.then_block] = true;
-                            if ((condition != .boolean or !condition.boolean) and try self.joinEntry(&entries[branch.else_block], state)) pending[branch.else_block] = true;
-                        },
-                        else => {},
-                    }
+            var receivers: []const usize = &.{};
+            if (frame.arguments.len != 0 and frame.arguments[0].nodes.len > 1 and
+                !(self.cleanup_functions.len == self.program.functions.len and self.cleanup_functions[frame.function]))
+            {
+                if (f.value_types[0].structureIndex()) |receiver_type| if (self.program.structures[receiver_type].is_class) {
+                    receivers = frame.arguments[0].nodes;
+                };
+            }
+            const partitions = if (receivers.len == 0) 1 else receivers.len;
+            for (0..partitions) |partition| {
+                const entries = try self.a.alloc(?M.State, f.blocks.len);
+                @memset(entries, null);
+                var initial: M.State = .{ .memory = try M.cloneMemory(self.a, frame.incoming) };
+                for (frame.arguments, 0..) |argument, index| try initial.set(self.a, index, argument);
+                if (receivers.len != 0) {
+                    var receiver = frame.arguments[0];
+                    receiver.nodes = try self.a.dupe(usize, &.{receivers[partition]});
+                    receiver.region = self.a.ptr;
+                    try initial.set(self.a, 0, receiver);
                 }
-                if (!processed) break;
+                entries[0] = initial;
+                const pending = try self.a.alloc(bool, f.blocks.len);
+                @memset(pending, false);
+                pending[0] = true;
+                while (true) {
+                    var processed = false;
+                    for (f.blocks, 0..) |block, block_id| {
+                        if (!pending[block_id]) continue;
+                        pending[block_id] = false;
+                        processed = true;
+                        const entry = entries[block_id].?;
+                        var state = try entry.clone(self.a);
+                        if (self.resource_loops.len == self.program.functions.len) if (self.resource_loops[frame.function][block_id]) |plan| {
+                            const type_index = f.value_types[plan.collection].structureIndex() orelse unreachable;
+                            const collection = self.program.structures[type_index].collection orelse unreachable;
+                            const length: ?usize = if (collection.length) |n| n else self.collectionLength(state.get(plan.collection));
+                            if (length) |count| if (count <= std.math.maxInt(i32)) {
+                                for (0..count) |iteration| {
+                                    try self.transferBlock(id, block_id, &state, null);
+                                    if (self.diagnostic != null) return .{};
+                                    if (!state.reachable) break;
+                                    try state.set(self.a, plan.condition, .{ .scalar = .{ .boolean = true } });
+                                    try self.transferBlock(id, plan.body, &state, .{ .instruction = plan.load, .element = if (plan.reverse) count - iteration - 1 else iteration });
+                                    if (self.diagnostic != null) return .{};
+                                    if (!state.reachable) break;
+                                }
+                                if (state.reachable) {
+                                    try self.transferBlock(id, block_id, &state, null);
+                                    if (self.diagnostic != null) return .{};
+                                    if (state.reachable) {
+                                        try state.set(self.a, plan.condition, .{ .scalar = .{ .boolean = false } });
+                                        if (try self.joinEntry(&entries[plan.exit], state)) pending[plan.exit] = true;
+                                    }
+                                }
+                                continue;
+                            };
+                        };
+                        try self.transferBlock(id, block_id, &state, null);
+                        if (self.diagnostic != null) return .{};
+                        if (!state.reachable) continue;
+                        switch (block.terminator) {
+                            .return_value, .return_void => {
+                                const output: Value = if (block.terminator == .return_value) state.get(block.terminator.return_value) else .{};
+                                if (block.terminator == .return_value and M.capable(self.capable, f.return_type)) try self.escape(id, null, output, state.memory, block.terminator_position, true);
+                                try self.externals(id, null, &state, block.terminator_position);
+                                const joined = try Value.join(frame.returned, output, self.a);
+                                const returned_changed = !Value.eql(joined, frame.returned);
+                                frame.returned = joined;
+                                const output_changed = try M.joinMemory(self.a, &frame.output, state.memory);
+                                frame.changed = returned_changed or output_changed or frame.changed;
+                            },
+                            .jump => |target| if (try self.joinEntry(&entries[target], state)) {
+                                pending[target] = true;
+                            },
+                            .branch => |branch| {
+                                const condition = state.get(branch.condition).scalar;
+                                if (condition != .boolean or condition.boolean) {
+                                    var next = state;
+                                    if (try Refine.apply(self, id, block_id, true, &next) and try self.joinEntry(&entries[branch.then_block], next)) pending[branch.then_block] = true;
+                                }
+                                if (condition != .boolean or !condition.boolean) {
+                                    var next = state;
+                                    if (try Refine.apply(self, id, block_id, false, &next) and try self.joinEntry(&entries[branch.else_block], next)) pending[branch.else_block] = true;
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                    if (!processed) break;
+                }
             }
             if (!frame.recursive or !frame.changed) break;
         }
-        memory.* = try frame.output.promote(self.a, caller_allocator);
+        const output = try frame.output.promote(self.a, caller_allocator);
+        memory.* = output;
         return frame.returned.promote(self.a, caller_allocator);
+    }
+    const ElementOverride = struct { instruction: usize, element: usize };
+    fn transferBlock(self: *Engine, frame_id: usize, block_id: usize, state: *M.State, override: ?ElementOverride) A.Error!void {
+        const f = self.program.functions[self.frames.items[frame_id].function];
+        const block = f.blocks[block_id];
+        for (0..block.instructions.len + 1) |index| {
+            for (f.borrow_ends) |end| if (end.block == block_id and end.instruction == index) try self.scopeEnd(frame_id, end, state);
+            if (self.diagnostic != null) return;
+            if (index < block.instructions.len) {
+                if (override != null and override.?.instruction == index) {
+                    const access = block.instructions[index].collection_load;
+                    try state.set(self.a, access.result, try self.field(&state.memory, state.get(access.collection), override.?.element, f.value_types[access.result]));
+                } else try Machine.step(self, frame_id, block_id, index, block.instructions[index], state);
+                if (self.diagnostic != null or !state.reachable) return;
+            }
+        }
     }
     fn joinEntry(self: *Engine, target: *?M.State, state: M.State) A.Error!bool {
         if (target.*) |*entry| return entry.join(self.a, state);
@@ -484,13 +683,16 @@ pub const Engine = struct {
         if (!self.borrowed[self.frames.items[frame].function]) return;
         try self.externals(frame, end.lifetimes, state, end.position);
         for (end.live) |binding| {
-            const value: Value = if (binding.local) |local| state.memory.get(.{ .object = self.frames.items[frame].locals, .field = local }) orelse .{} else if (binding.value) |v| state.get(v) else .{};
+            const caller = self.frames.items[frame];
+            const f = self.program.functions[caller.function];
+            const value: Value = if (binding.local) |local| (if (caller.unaliased_locals[local]) state.get(f.value_types.len + local) else state.memory.get(.{ .object = caller.locals, .field = local }) orelse .{}) else if (binding.value) |v| state.get(v) else .{};
             try self.escape(frame, end.lifetimes, value, state.memory, end.position, false);
         }
     }
     fn externals(self: *Engine, frame: usize, lifetimes: ?[]const usize, state: *M.State, position: ?Source.Position) A.Error!void {
         if (!self.borrowed[self.frames.items[frame].function]) return;
-        for (self.frames.items[frame].arguments) |argument| try self.escape(frame, lifetimes, argument, state.memory, position, false);
+        const f = self.program.functions[self.frames.items[frame].function];
+        for (0..f.capture_types.len + f.parameter_types.len) |input| try self.escape(frame, lifetimes, state.get(input), state.memory, position, false);
         try self.escape(frame, lifetimes, try Value.one(self.a, self.globals), state.memory, position, false);
     }
     fn escape(self: *Engine, frame: usize, lifetimes: ?[]const usize, value: Value, memory: M.Memory, position: ?Source.Position, returned: bool) A.Error!void {
