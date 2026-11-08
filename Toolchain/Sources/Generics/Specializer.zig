@@ -556,7 +556,18 @@ pub const Specializer = struct {
                     .collection => |source| element: {
                         const rewritten_source = try self.rewriteExpression(source, arguments, locals);
                         copy.source = .{ .collection = rewritten_source };
-                        const source_type = self.inferExpressionType(rewritten_source, locals.items) orelse break :element null;
+                        // indexed() is a for-source adapter, not a method with
+                        // its own result type. Infer elements from its receiver.
+                        const inference_source = if (loop.index_name != null and rewritten_source.value == .call and
+                            rewritten_source.value.call.receiver != null and
+                            std.mem.eql(u8, rewritten_source.value.call.name, "indexed") and
+                            rewritten_source.value.call.arguments.len == 0 and
+                            rewritten_source.value.call.named_arguments.len == 0 and
+                            rewritten_source.value.call.type_arguments.len == 0)
+                            rewritten_source.value.call.receiver.?
+                        else
+                            rewritten_source;
+                        const source_type = self.inferExpressionType(inference_source, locals.items) orelse break :element null;
                         const structure = self.structureForType(source_type) orelse break :element null;
                         if (structure.query_pattern) |pattern_type| {
                             const pattern = self.structureForType(pattern_type) orelse break :element null;
@@ -577,6 +588,7 @@ pub const Specializer = struct {
                         break :range_value .int;
                     },
                 };
+                if (loop.index_name) |name| try locals.append(self.allocator, .{ .name = name, .type = .int });
                 if (element_type) |type_value| try locals.append(self.allocator, .{ .name = loop.name, .type = type_value });
                 copy.statements = try self.rewriteStatements(loop.statements, arguments, locals);
                 locals.shrinkRetainingCapacity(local_count);

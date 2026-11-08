@@ -6,6 +6,10 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
+## [Unreleased]
+
+- Corriger l’inférence des appels génériques dans les boucles `indexed()` : l’élément conserve son type de collection et l’indice son type `int`, y compris dans les boucles imbriquées. Les modes d’emprunt et de copie restent inchangés.
+
 ## [0.48.0] - 2026-11-08
 
 ### Pourquoi mettre à jour ?

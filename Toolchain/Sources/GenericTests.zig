@@ -1265,3 +1265,31 @@ test "generic protocol calls infer named factories through a project match" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("named factory inference: ok\n", result.stdout);
 }
+
+test "generic calls infer indexed loop elements and indices in their lexical scope" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Reader { func read<T>(value:T) T { return value } }
+        \\func identity<T>(value:T) T { return value }
+        \\func values() int[] { return [7, 8] }
+        \\func main() {
+        \\    let item = "outer"
+        \\    let fixed:int[2] = [3, 4]
+        \\    for index, item in fixed.indexed() {
+        \\        print(identity(index), ":", Reader().read(item))
+        \\        for index, let item in values().indexed() {
+        \\            print(Reader().read<int>(index), ":", identity(item))
+        \\        }
+        \\        print(identity(item))
+        \\    }
+        \\    var mutable:int[] = [10]
+        \\    for index, var item in mutable.indexed() { item = Reader().read(item) + identity(index) }
+        \\    print(Reader().read(item), ":", mutable[0])
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("0:3\n0:7\n1:8\n3\n1:4\n0:7\n1:8\n4\nouter:10\n", result.stdout);
+}

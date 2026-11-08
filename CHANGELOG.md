@@ -6,6 +6,10 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
+## [Unreleased]
+
+- Fix generic call inference inside `indexed()` loops: elements retain their collection type and indices retain `int`, including in nested loops. Borrowing and copying modes remain unchanged.
+
 ## [0.48.0] - 2026-11-08
 
 ### Why upgrade?

@@ -1,0 +1,27 @@
+func identity<T>(value:T) T { return value }
+struct Reader { func read<T>(value:T) T { return value } }
+protocol Work { func execute() }
+class Counter { var value:int=0 }
+struct Task:Work {
+    var counter:Counter
+    func execute() { self.counter.value++ }
+}
+struct Queue {
+    func submit<T:Work>(value:T) { var task=value;task.execute() }
+}
+
+test "indexed elements and indices retain types for generic calls" {
+    var values:int[]=[3,4]
+    for index,var value in values.indexed() {
+        value=Reader().read(value)+identity(index)
+    }
+    assert(values[0]==3 && values[1]==5)
+}
+
+test "indexed mutable jobs retain their protocol witness through generic submission" {
+    var jobs:Task[]=[Task(counter:Counter()),Task(counter:Counter())]
+    for index,var job in jobs.indexed() {
+        if index>0 { Queue().submit(job) }
+    }
+    assert(jobs[0].counter.value==0 && jobs[1].counter.value==1)
+}
