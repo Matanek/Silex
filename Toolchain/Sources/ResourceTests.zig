@@ -278,3 +278,34 @@ test "nested value receivers release a field replaced during reentry" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("item 1\nbody\nitem 2\ndone\n", output);
 }
+
+test "class drop plan reuse preserves IR across analyses and constructed base cleanup" {
+    const sources = [_][]const u8{
+        \\class Base { var id:int; init(id:int) { self.id = id } drop { print("base ", self.id) } }
+        \\class Child:Base { init(id:int):super(id) {} drop { print("child ", self.id) } }
+        \\func main() { { var value:Base = Child(7); let callback = func() { print(value.id) }; callback() } }
+        ,
+        \\func extra() {}
+        \\class Other { var value:int = 2; drop { print("other") } }
+        \\func main() { var value = Other(); print(value.value) }
+        ,
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var reused = @import("Semantic/Analyzer.zig").Analyzer.init(allocator);
+    for (sources, 0..) |source, index| {
+        var frontend = Frontend.Frontend.init(allocator);
+        const compiled = try frontend.compile(source);
+        var oracle = @import("Semantic/Analyzer.zig").Analyzer.init(allocator);
+        oracle.class_drop_plans.enabled = false;
+        const expected = try oracle.analyze(compiled.ast);
+        const actual = if (index == 0) try reused.analyze(compiled.ast) else try reused.analyzeUnit(compiled.ast);
+        try std.testing.expectEqualStrings(try Ir.writeText(allocator, expected), try Ir.writeText(allocator, actual));
+        try std.testing.expectEqualStrings(try std.json.Stringify.valueAlloc(allocator, expected, .{}), try std.json.Stringify.valueAlloc(allocator, actual, .{}));
+        try std.testing.expect(reused.class_drop_plans.plans.count() > 0);
+        const output = try Interpreter.runCapture(allocator, actual);
+        try std.testing.expectEqual(@as(u8, 0), output.exit_code);
+        try std.testing.expectEqualStrings(if (index == 0) "7\nchild 7\nbase 7\n" else "2\nother\n", output.stdout);
+    }
+}

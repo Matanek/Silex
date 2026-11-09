@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Semantic analysis shares identical destruction plans between operations in
+  one program. Each new analysis resets the lookup; inherited finalizers and
+  construction cleanup remain identical.
+
 - Specialization filters incompatible anonymous declarations by position and
   arity before comparing names. Lexical callback selection and capture context
   remain identical, with fewer comparisons during compilation.

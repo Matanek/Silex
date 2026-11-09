@@ -126,3 +126,25 @@ locals. The 1,024-declaration fixture performs two name checks instead of 1,024
 while selecting the same body. This count describes the mechanism, not a
 portable end-to-end timing guarantee. Both compilation backends use the shared
 specializer; native ABI, emitted instructions and public syntax are unchanged.
+
+## Per-analysis class destruction plans
+
+`Resources.classDropPlans` shares immutable finalizer lists for the same optional
+static type within one semantic analysis. Erased callback owners (`null`) have
+a distinct entry from nominal class zero. Class names, inheritance, class/static
+flags and generated function identities are fixed by declaration preparation;
+subsequent tuple field inference does not change those inputs.
+
+The analyzer clears the table before each `analyze` or `analyzeUnit`, including
+failed or repeated analyses. A change in the prepared structure storage or its
+length also clears the entries. Previously emitted IR keeps its arena-owned
+plans alive; reset only discards lookup entries. Cached package functions are
+independently deserialized before relocation. Entry-closure remapping creates
+new plan arrays instead of modifying shared frontend plans.
+
+The temporary allocation used to construct a derived object's base still uses
+its dedicated field-only cleanup. It never reuses the ordinary plan that invokes
+user drop hooks. An uncached path remains available to internal tests, which
+compare complete IR text and serialization, inherited destruction order and
+successive analyses. This table is compiler-local, not a persistent package
+artifact, and applies equally to the shared frontend of both backends.

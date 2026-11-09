@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- L’analyse partage les plans de destruction identiques entre les opérations
+  d’un même programme. Leur remise à zéro accompagne chaque nouvelle analyse ;
+  les finaliseurs hérités et le nettoyage des constructions restent identiques.
+
 - La spécialisation écarte les déclarations anonymes incompatibles par position
   et arité avant de comparer leurs noms. La sélection des callbacks lexicaux
   et leur contexte de capture restent identiques, avec moins de comparaisons

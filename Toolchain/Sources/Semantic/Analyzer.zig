@@ -94,6 +94,7 @@ pub const Analyzer = struct {
     anonymous_access: []?AnonymousAccess = &.{},
     bound_methods: std.ArrayList(Callbacks.BoundMethod) = .empty,
     recursive_value_resources: []const bool = &.{},
+    class_drop_plans: Resources.ClassDropPlanCache = .{},
     function_context: ?Ast.Function = null,
     static_initialization_limit: ?usize = null,
     target: ?Target = null,
@@ -120,6 +121,7 @@ pub const Analyzer = struct {
         return self.analyzeProgram(program, false);
     }
     fn analyzeProgram(self: *Analyzer, source_program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
+        self.class_drop_plans.reset();
         self.diagnostic = null;
         const program = materialized: {
             var span = self.traceSpan(.semantic_materialization);

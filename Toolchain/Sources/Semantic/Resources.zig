@@ -5,6 +5,20 @@ const Model = @import("Model.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
+/// Class headers and generated function identities are fixed by preparation.
+/// Tuples may still change fields/names; neither participates in these plans.
+/// Clear at every analysis and whenever the prepared structure storage changes.
+pub const ClassDropPlanCache = struct {
+    enabled: bool = true,
+    structures: []const Ir.Structure = &.{},
+    plans: std.AutoHashMapUnmanaged(?usize, []const Ir.Instruction.ClassDrop.Plan) = .empty,
+
+    pub fn reset(self: *ClassDropPlanCache) void {
+        self.structures = &.{};
+        self.plans.clearRetainingCapacity();
+    }
+};
+
 pub fn needsDrop(self: anytype, type_value: Ast.Type) bool {
     return needsDropInner(self, type_value, 0);
 }
@@ -560,6 +574,14 @@ pub fn emitProtocolResourceBody(self: anytype, builder: anytype, protocol_index:
 }
 
 fn classDropPlans(self: anytype, static_type: ?usize) ![]const Ir.Instruction.ClassDrop.Plan {
+    const cache = &self.class_drop_plans;
+    if (cache.enabled) {
+        if (cache.structures.ptr != self.structures.ptr or cache.structures.len != self.structures.len) {
+            cache.reset();
+            cache.structures = self.structures;
+        }
+        if (cache.plans.get(static_type)) |plans| return plans;
+    }
     var plans: std.ArrayList(Ir.Instruction.ClassDrop.Plan) = .empty;
     for (self.structures, 0..) |structure, candidate| {
         if (!structure.is_class or structure.is_static or
@@ -569,7 +591,9 @@ fn classDropPlans(self: anytype, static_type: ?usize) ![]const Ir.Instruction.Cl
             .functions = try classDropFunctions(self, candidate),
         });
     }
-    return plans.toOwnedSlice(self.allocator);
+    const result = try plans.toOwnedSlice(self.allocator);
+    if (cache.enabled) try cache.plans.put(self.allocator, static_type, result);
+    return result;
 }
 
 fn classDropFunctions(self: anytype, dynamic_type: usize) ![]const Ir.Instruction.ClassDrop.Finalizer {
@@ -898,4 +922,55 @@ fn expressionHasTry(expression: *const Ast.Expression) bool {
         .slice_access => |value| expressionHasTry(value.base) or expressionHasTry(value.start) or expressionHasTry(value.end),
         else => false,
     };
+}
+
+test "class drop plans reuse immutable results and distinguish erased owners from class zero" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const position: @import("../Source.zig").Position = .{ .offset = 0, .line = 1, .column = 1 };
+    const declarations = [_]Ast.Structure{
+        .{ .name = "Base", .position = position, .name_position = position, .fields = &.{}, .is_class = true, .drop = .{ .position = position, .statements = &.{} } },
+        .{ .name = "Child", .position = position, .name_position = position, .fields = &.{}, .is_class = true, .base = .structure(0), .drop = .{ .position = position, .statements = &.{} } },
+        .{ .name = "Other", .position = position, .name_position = position, .fields = &.{}, .is_class = true },
+    };
+    const structures = [_]Ir.Structure{
+        .{ .name = "Base", .fields = &.{}, .is_class = true },
+        .{ .name = "Child", .fields = &.{}, .is_class = true, .base = 0 },
+        .{ .name = "Other", .fields = &.{}, .is_class = true },
+    };
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        program: Ast.Program,
+        structures: []const Ir.Structure,
+        class_drop_plans: ClassDropPlanCache = .{},
+    };
+    var context: Context = .{
+        .allocator = arena.allocator(),
+        .program = Ast.Program{ .functions = &.{}, .structures = &declarations },
+        .structures = @as([]const Ir.Structure, &structures),
+    };
+    const erased = try classDropPlans(&context, null);
+    const base = try classDropPlans(&context, 0);
+    try std.testing.expectEqual(@as(usize, 3), erased.len);
+    try std.testing.expectEqual(@as(usize, 2), base.len);
+    try std.testing.expectEqualSlices(Ir.Instruction.ClassDrop.Finalizer, &.{
+        .{ .structure = 1, .function = 1 },
+        .{ .structure = 0, .function = 0 },
+        .{ .structure = 1, .function = 3 },
+    }, base[1].functions);
+    for (0..100) |_| try std.testing.expect(base.ptr == (try classDropPlans(&context, 0)).ptr);
+    try std.testing.expectEqual(@as(usize, 2), context.class_drop_plans.plans.count());
+    context.class_drop_plans.enabled = false;
+    const oracle = try classDropPlans(&context, 0);
+    try std.testing.expectEqualStrings(try std.json.Stringify.valueAlloc(context.allocator, oracle, .{}), try std.json.Stringify.valueAlloc(context.allocator, base, .{}));
+    context.class_drop_plans.enabled = true;
+    context.structures = structures[0..2];
+    try std.testing.expectEqual(@as(usize, 2), (try classDropPlans(&context, null)).len);
+    context.structures = &structures;
+    try std.testing.expectEqual(@as(usize, 3), (try classDropPlans(&context, null)).len);
+    try std.testing.expectEqual(@as(usize, 1), context.class_drop_plans.plans.count());
+    var replacement = structures;
+    replacement[1].base = null;
+    context.structures = &replacement;
+    try std.testing.expectEqual(@as(usize, 1), (try classDropPlans(&context, 0)).len);
 }
