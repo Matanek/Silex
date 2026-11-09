@@ -110,3 +110,19 @@ checks pass: `zig build check` (1,775 tests), `zig build test` (1,240 tests), an
 293 language scenarios in 115 files; those suites overlap. The name index remains
 an intermediate frontend improvement, not completion of the broader cold-build,
 LLVM compatibility, reuse or six-target distribution qualification.
+
+## Lexical callback candidate filtering
+
+Generic specialization resolves parser-lifted anonymous bodies at their lexical
+definition, preserving the binding types supplied by that context. Before a
+name or qualified suffix can match, the declaration must be anonymous and have
+the same source file, byte offset and generic arity. Checking these pure
+conditions first avoids name comparisons for impossible candidates without
+changing their order, selection or instantiation arguments.
+
+The lexical-callback selector tests compare the previous and filtered paths,
+including qualified suffix boundaries, files, offsets, arities and forwarded
+locals. The 1,024-declaration fixture performs two name checks instead of 1,024
+while selecting the same body. This count describes the mechanism, not a
+portable end-to-end timing guarantee. Both compilation backends use the shared
+specializer; native ABI, emitted instructions and public syntax are unchanged.

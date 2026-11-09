@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La spécialisation écarte les déclarations anonymes incompatibles par position
+  et arité avant de comparer leurs noms. La sélection des callbacks lexicaux
+  et leur contexte de capture restent identiques, avec moins de comparaisons
+  pendant la compilation.
+
 - Le transfert des copies natives évite de rechercher les définitions pour les
   entrées qui pointent déjà sur leur propre stockage. Les invalidations des
   autres alias et les instructions produites restent identiques en Debug et

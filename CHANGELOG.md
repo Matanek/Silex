@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Specialization filters incompatible anonymous declarations by position and
+  arity before comparing names. Lexical callback selection and capture context
+  remain identical, with fewer comparisons during compilation.
+
 - Native copy forwarding avoids definition queries for entries that already
   point to their own storage. Other alias invalidations and the emitted
   instructions remain identical in Debug and Release on the shared ARM64
