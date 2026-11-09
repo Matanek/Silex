@@ -251,6 +251,7 @@ jobs:
           "$silex" --version
           "$silex" targets | grep -F 'macos-x64'
           "$silex" setup
+          python3 .github/scripts/verify-local-compilation.py "$silex"
           shadercross="$HOME/.silex/toolchain/shadercross/3.0.0/macos-x64/bin/shadercross"
           file "$shadercross" | grep -F 'x86_64'
           "$shadercross" --help >/dev/null 2>&1
@@ -575,6 +576,7 @@ jobs:
 
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
+          python3 .github/scripts/verify-local-compilation.py "$silex"
           "$silex" link "$GITHUB_WORKSPACE/Dependencies/STD" --workspace "$GITHUB_WORKSPACE"
           managed_zig="$HOME/.silex/toolchain/zig/0.16.0/linux-arm64/zig"
           test -x "$managed_zig"
@@ -758,6 +760,7 @@ jobs:
             --build-file Toolchain/build.zig
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
+          python3 .github/scripts/verify-local-compilation.py "$silex"
           "$silex" link "$GITHUB_WORKSPACE/Dependencies/STD" --workspace "$GITHUB_WORKSPACE"
           "$silex" test --backend native "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test --backend native "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
@@ -934,6 +937,7 @@ jobs:
             --build-file Toolchain/build.zig
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
+          python .github/scripts/verify-local-compilation.py $silex
           & $silex link (Join-Path $env:GITHUB_WORKSPACE "Dependencies/STD") --workspace $env:GITHUB_WORKSPACE
           & $silex test --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
           & $silex test --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
@@ -1309,6 +1313,7 @@ jobs:
           if ($managedZigMachine -ne 0x8664) {
             throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"
           }
+          python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows
           $shaderMachine = Get-PeMachine $shadercross
           if ($shaderMachine -ne 0x8664) {
             throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"
@@ -1517,5 +1522,5 @@ jobs:
         shell: bash
         run: |
           sh .github/scripts/smoke-native-memory.sh \
-            "$RUNNER_TEMP/silex-prefix/bin/silex.exe" \
+            "$RUNNER_TEMP/silex-install/bin/silex.exe" \
             "$RUNNER_TEMP/signed-storage"

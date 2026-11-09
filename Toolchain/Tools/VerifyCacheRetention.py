@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Verify CLI retention after final writes, from the workspace root.
+"""Verify native reuse and retention after final writes, from the workspace root.
 
 Run alone with a built CLI. Uses the shared cache, temporary sources, and one
-old sparse history file; no native executable is launched. No timing assertions.
+old sparse history file. Only small console fixtures are launched; no timing assertions.
 """
 import argparse
 import hashlib
@@ -22,6 +22,50 @@ def retained_bytes(cache):
     return sum(path.stat().st_size
                for relative in ROOTS for path in (cache / relative).rglob("*")
                if path.is_file() and not path.is_symlink())
+
+
+def verify_reuse(compiler, mode):
+    """Same-basename consumers must retain hits and invalidate edited imports."""
+    with tempfile.TemporaryDirectory(prefix="silex-native-reuse-") as directory:
+        root = Path(directory)
+        projects = [root / name for name in ("First", "Second")]
+        for project, value in zip(projects, (41, 42)):
+            project.mkdir()
+            (project / "Package.json").write_text('{"sources":"."}\n')
+            (project / "Shared.sx").write_text(f"public func answer() int {{ return {value} }}\n")
+            (project / "Main.sx").write_text('use Module.Shared.answer\nfunc main() { print(answer()) }\n')
+        trace = root / "trace.json"
+        env = dict(os.environ, SILEX_COMPILATION_TRACE=str(trace),
+                   SILEX_USER_PACKAGE_ALLOWLIST="STD")
+        digests = {}
+
+        def compile_case(index, value, expected):
+            project = projects[index]
+            output = project / ("program.exe" if os.name == "nt" else "program")
+            result = subprocess.run([str(compiler), "compile", str(project / "Main.sx"),
+                                     "--backend", "native", "--" + mode, "-o", str(output)],
+                                    env=env, capture_output=True, text=True, timeout=60)
+            assert result.returncode == 0 and not result.stdout and not result.stderr, result
+            report = json.loads(trace.read_text())
+            assert report["cache_result"] == expected, report
+            digest = hashlib.sha256(output.read_bytes()).digest()
+            if expected == "hit_before_frontend":
+                assert digest == digests[index]
+                assert report["metrics"]["cache_bytes_written"] == 0, report
+                for phase in ("frontend_total", "optimization", "lowering", "emission", "linking"):
+                    assert next(p for p in report["phases"] if p["name"] == phase)["invocations"] == 0, report
+            digests[index] = digest
+            actual = subprocess.run([str(output)], capture_output=True, text=True, timeout=60)
+            assert actual.returncode == 0 and actual.stdout == str(value) + "\n" and not actual.stderr, actual
+
+        for index, value, expected in ((0, 41, "miss"), (1, 42, "miss"),
+                                       (0, 41, "hit_before_frontend"), (1, 42, "hit_before_frontend")):
+            compile_case(index, value, expected)
+        (projects[0] / "Shared.sx").write_text("public func answer() int { return 43 }\n")
+        compile_case(0, 43, "miss")
+        compile_case(0, 43, "hit_before_frontend")
+        compile_case(1, 42, "hit_before_frontend")
+        print(f"native {mode}: A/B hits retained; edited import invalidates only A", flush=True)
 
 
 def verify_publication(compiler, command, fail=False):
@@ -95,6 +139,8 @@ def main():
     parser.add_argument("compiler", type=Path)
     args = parser.parse_args()
     compiler = args.compiler.resolve(strict=True)
+    verify_reuse(compiler, "debug")
+    verify_reuse(compiler, "release")
     verify_publication(compiler, "compile")
     verify_publication(compiler, "interpret")
     verify_publication(compiler, "interpret", fail=True)

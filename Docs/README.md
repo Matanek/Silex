@@ -66,6 +66,9 @@ Imported provider declarations alone do not require execution support. The
 interpreter still rejects unsupported calls in that closure and guards indirect
 foreign dispatch at runtime; it does not gain native file I/O from this check.
 
+See [local compilation portability](Local-compilation-portability.md) for shared
+compilation work, native target applicability and the reuse/retention guards.
+
 ## Architecture rules
 
 These rules keep source semantics independent from the bootstrap implementation

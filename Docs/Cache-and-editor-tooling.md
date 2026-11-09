@@ -46,8 +46,10 @@ reusable entries and their maintenance; it does not remove existing entries.
 Run `python3 Silex/Toolchain/Tools/VerifyCacheRetention.py <built-cli>` from the
 workspace root, without concurrent builds, to verify final native/interpreter
 publication, an interpreter error exit, and a native executable hit. It uses the shared cache,
-a temporary source and an oldest sparse history file. It removes its private
-probe files even on failure and never launches the native executable.
+temporary sources and an oldest sparse history file. It checks native Debug/Release
+A/B reuse and imported-source invalidation using small console programs, then
+removes its private probe files even on failure. The retention probe does not
+launch its native executable.
 
 ## Share LLVM compilation fragments
 

@@ -8,6 +8,9 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les gardes de compilation locale couvrent les alias actifs, la réutilisation
+  native Debug/Release et la rétention dans les validations natives multi-cibles.
+
 - Le cache natif et celui de l’interpréteur appliquent leur rétention après
   les écritures, y compris sur les sorties en erreur. Les relances natives
   réutilisant un exécutable restent sur leur chemin rapide.
