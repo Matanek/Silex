@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le cache natif et celui de l’interpréteur appliquent leur rétention après
+  les écritures, y compris sur les sorties en erreur. Les relances natives
+  réutilisant un exécutable restent sur leur chemin rapide.
+
 - La validation de l’IR conserve les contrôles du writer sans formater ni
   allouer de texte jeté. L’export textuel reste déterministe ; les indices
   globaux et cibles d’appels dynamiques sont vérifiés explicitement.

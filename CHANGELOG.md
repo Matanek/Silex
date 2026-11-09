@@ -8,6 +8,9 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native and interpreter caches enforce retention after writes, including
+  error exits. Native executable cache hits retain their fast path.
+
 - IR validation retains the writer checks without formatting or allocating
   discarded text. Explicit text output remains deterministic, and global indices
   and dynamic-call targets are checked explicitly.

@@ -27,6 +27,28 @@ lowered method skips the intrinsics that originally read these files.
 its private executable under `.silex/run/`; the option forces rebuilding it
 and does not change the command's output location.
 
+## Bound retained local history
+
+The local cache shares a 320 MiB history allowance across typed/native entries,
+artifacts, shader trees, run/test executables and LLVM staging trees. Its effective
+limit is the larger of that allowance and the current compilation's working set.
+The oldest unused entries are removed first; entries written or read by the
+current compilation are protected. A later smaller compilation releases the old
+peak. This bounds retained history without making an oversized active program
+rebuild on every invocation. It is a logical-size policy, not an exact bound on
+filesystem allocation or installed package/toolchain archives.
+
+Native cache misses and interpreter invocations enforce this policy on function
+exit, after all publications, including failure exits. Native executable hits
+before the frontend do not run this post-mutation scan. `--nocache` bypasses the
+reusable entries and their maintenance; it does not remove existing entries.
+
+Run `python3 Silex/Toolchain/Tools/VerifyCacheRetention.py <built-cli>` from the
+workspace root, without concurrent builds, to verify final native/interpreter
+publication, an interpreter error exit, and a native executable hit. It uses the shared cache,
+a temporary source and an oldest sparse history file. It removes its private
+probe files even on failure and never launches the native executable.
+
 ## Share LLVM compilation fragments
 
 On the supported macOS ARM64 LLVM backend, a new application or an edited entry

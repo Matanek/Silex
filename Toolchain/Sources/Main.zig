@@ -1473,10 +1473,8 @@ fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: [
         std.debug.print("silex: 'interpret' requires a recognized host target\n", .{});
         return 1;
     };
-    if (options.cache) {
-        CompilationCache.maintain(allocator, init.io);
-        defer CompilationCache.maintainAfterMutation(allocator, init.io);
-    }
+    if (options.cache) CompilationCache.maintain(allocator, init.io);
+    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
     var boundaries: []const Boundary.Function = &.{};
     const cached_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path, target.name()) else null;
     const portable_ir = if (cached_ir) |cached| if (containsBoundaryCall(cached)) null else cached else null;
@@ -1924,6 +1922,11 @@ fn compileNativeOptions(
             };
         };
     }
+    // A cache miss may write frontend, machine and executable entries. Keep
+    // cleanup off the cache-hit path and enforce the disk budget once after
+    // the mutating compilation has completed.
+    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
+
     var frontend_arena = std.heap.ArenaAllocator.init(init.gpa);
     var frontend_live = true;
     defer if (frontend_live) frontend_arena.deinit();
@@ -2004,13 +2007,6 @@ fn compileNativeOptions(
         frontend_live = false;
         break :program backend_input.ir;
     };
-
-    // A cache miss may write frontend, machine and executable entries. Keep
-    // cleanup off the cache-hit path and enforce the disk budget once after
-    // the mutating compilation has completed.
-    if (options.cache) {
-        defer CompilationCache.maintainAfterMutation(allocator, init.io);
-    }
 
     if (emit_ir) {
         const text = try Ir.writeText(allocator, program);
