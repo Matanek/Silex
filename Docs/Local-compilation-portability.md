@@ -51,9 +51,14 @@ interpreter publication or interpreter failure. Only console fixtures execute.
 The five non-local native jobs in `native-portability.yml` invoke
 `.github/scripts/verify-local-compilation.py` after setup. It runs the unit portal
 on that host and the CLI bank from the common workspace above the checkout.
-Windows ARM64 explicitly selects `aarch64-windows` when its Zig bootstrap tool
-runs through X64 compatibility; the tested CLI, unit binary and generated native
-programs remain ARM64. No cache archive is uploaded by these guards.
+The Windows ARM64 Linux bootstrap cross-builds the same unit portal with
+`zig build build-local-compilation-tests -Dtarget=aarch64-windows` and transfers
+its executable and SHA-256 digest. The Windows runner checks its PE architecture
+and digest, then passes `--unit-executable` to execute every unit natively before
+the CLI bank. Standalone unit execution exposes the current test in the log;
+unit construction no longer shares a silent step with X64-emulated Zig. The
+managed X64 linker still serves the ARM64 CLI bank. No cache archive is uploaded
+by these guards.
 
 ## Observe an interrupted first compilation
 
@@ -68,9 +73,8 @@ the test waiting indefinitely for captured pipes to close.
 `--initial-compile-timeout` changes only the diagnostic observation window for
 the first Debug compile. Other compilation cases keep their 60-second safety
 bound, and all reuse, invalidation, output and storage assertions remain active.
-The Windows ARM64 workflow explicitly permits 300 seconds for that one initial
-observation after an unexplained first-compile timeout. This is not a relaxed
-product latency budget or evidence that the delay comes from the linker.
+Changing that observation window is not a relaxed product latency budget or
+evidence that the delay comes from the linker.
 Interpret its phase timings before attributing or correcting the cost. Process
 capture/cleanup regressions run through `VerifyCacheProcess.py` on every host.
 

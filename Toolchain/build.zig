@@ -575,6 +575,10 @@ pub fn build(b: *std.Build) void {
     const local_compilation_command = b.addRunArtifact(local_compilation_tests);
     local_compilation_command.setCwd(b.path(""));
     b.step("test-fast-local-compilation", "Verify shared compilation work and bounded local cache").dependOn(&local_compilation_command.step);
+    const local_compilation_install = b.addInstallArtifact(local_compilation_tests, .{
+        .dest_sub_path = if (target.result.os.tag == .windows) "silex-local-compilation-tests.exe" else "silex-local-compilation-tests",
+    });
+    b.step("build-local-compilation-tests", "Build the shared compilation guards for native execution on another host").dependOn(&local_compilation_install.step);
     const rounded_float_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "rounded floating conversion", "native rounded conversion" } });
     rounded_float_tests.stack_size = test_stack_size;
     const rounded_float_command = b.addRunArtifact(rounded_float_tests);

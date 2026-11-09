@@ -1170,6 +1170,10 @@ jobs:
             -target aarch64-windows \
             -femit-bin="$stage/boundary/BoundaryProbe.lib"
           test "$(head -c 8 "$stage/boundary/BoundaryProbe.lib")" = "!<arch>"
+          zig build build-local-compilation-tests -Dtarget=aarch64-windows \
+            -Doptimize=ReleaseFast -Dtest-optimize=Debug -Dcpu=baseline \
+            --prefix "$stage/unit-tests" --build-file Toolchain/build.zig
+          (cd "$stage/unit-tests/bin" && sha256sum silex-local-compilation-tests.exe > SHA256SUMS.txt)
           zig build test-debug-copies -Demit-native-probes=true --build-file Toolchain/build.zig
           mkdir -p "$stage/cache-probes"
           cp Toolchain/.zig-cache/native-scalar-cache/windows-arm64-* "$stage/cache-probes/"
@@ -1186,7 +1190,7 @@ jobs:
     if: inputs.target == 'all' || inputs.target == 'windows-arm64'
     needs: windows-arm64-build
     runs-on: windows-11-arm
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out Silex
@@ -1293,6 +1297,12 @@ jobs:
           }
 
           $bootstrapRoot = Join-Path $env:RUNNER_TEMP "windows-arm64-bootstrap"
+          $unitExecutable = Join-Path $bootstrapRoot "unit-tests/bin/silex-local-compilation-tests.exe"
+          Assert-Arm64Pe $unitExecutable
+          $unitExpectedHash = (Get-Content (Join-Path $bootstrapRoot "unit-tests/bin/SHA256SUMS.txt")).Split(" ")[0]
+          if ((Get-FileHash $unitExecutable -Algorithm SHA256).Hash.ToLowerInvariant() -ne $unitExpectedHash) {
+            throw "shared compilation unit executable checksum mismatch"
+          }
           $buildPrefix = Join-Path $bootstrapRoot "silex"
           $builtSilex = Join-Path $buildPrefix "bin/silex.exe"
           Assert-Arm64Pe $builtSilex
@@ -1329,7 +1339,7 @@ jobs:
           if ($managedZigMachine -ne 0x8664) {
             throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"
           }
-          python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows --cold-link-cache
+          python .github/scripts/verify-local-compilation.py $silex --unit-executable $unitExecutable --cold-link-cache
           python Toolchain/Tools/VerifyWindowsStartup.py $silex $boundaryArchive
           if ($LASTEXITCODE -ne 0) { throw "standalone UCRT startup regression" }
           python Toolchain/Tools/VerifyWindowsStartup.py $silex $boundaryArchive --cpp-runtime

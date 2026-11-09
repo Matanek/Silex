@@ -14,6 +14,8 @@ def main():
     parser.add_argument("compiler", type=Path)
     parser.add_argument("--zig", default="zig")
     parser.add_argument("--target", help="Explicit Zig target when the bootstrap tool is emulated")
+    parser.add_argument("--unit-executable", type=Path,
+                        help="Native unit executable built by the matching bootstrap stage")
     parser.add_argument("--initial-compile-timeout", type=float, default=60)
     parser.add_argument("--cold-link-cache", action="store_true",
                         help="Measure the consumer bank with a fresh, disposable SDK cache")
@@ -26,12 +28,17 @@ def main():
                "-Doptimize=ReleaseFast", "-Dtest-optimize=Debug", "-Dcpu=baseline", "--summary", "all"]
     if args.target:
         command.append("-Dtarget=" + args.target)
+    if args.unit_executable:
+        command = [str(args.unit_executable.resolve(strict=True))]
+    print("RUN shared compilation unit guards: " + " ".join(command), flush=True)
     subprocess.run(command, cwd=checkout / "Toolchain", check=True)
     # Every source-compiling CLI invocation shares the workspace above the repo.
+    print("RUN native CLI process-capture guards", flush=True)
     subprocess.run([sys.executable, str(checkout / "Toolchain/Tools/VerifyCacheProcess.py")],
                    cwd=checkout.parent, check=True)
     bank = [sys.executable, str(checkout / "Toolchain/Tools/VerifyCacheRetention.py"),
             str(compiler), "--initial-compile-timeout", str(args.initial_compile_timeout)]
+    print("RUN native CLI reuse and retention bank", flush=True)
     if args.cold_link_cache:
         with tempfile.TemporaryDirectory(prefix="silex-cold-link-") as directory:
             subprocess.run(bank, cwd=checkout.parent, check=True,
