@@ -30,6 +30,21 @@ Release optimization is applied to this portable contract before either
 backend-specific lowering. Debug sends the closed portable program directly to
 the selected backend.
 
+## Ownership at the frontend transfer
+
+Before releasing the frontend arena, both compilation routes copy the complete
+backend input into the backend arena. `BackendTransfer` recursively copies typed
+structures, tagged union payloads, optionals, arrays and ordinary slices. Scalar
+bits and identifiers remain unchanged; every nested slice gets owned storage.
+Unsupported pointer shapes fail compilation of the bootstrap toolchain instead
+of silently borrowing frontend memory.
+
+This in-memory ownership transfer performs no text serialization or parsing. It
+does not alter persistent cache formats, source checks, optimizer verification,
+IR identity or target ABI. The lifetime regression compares complete JSON values
+with the historical transfer and reads provider, boundary and source descriptors
+after releasing the frontend arena, then executes the transferred console IR.
+
 ## Responsibilities owned by each backend
 
 The native backend lowers portable IR to the shared machine IR, applies the

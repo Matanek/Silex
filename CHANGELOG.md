@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Program transfer to compilation backends copies typed descriptors directly,
+  without intermediate JSON serialization. Metadata and ownership lifetimes
+  are preserved while compilation avoids the text conversion.
+
 - Semantic analysis shares identical destruction plans between operations in
   one program. Each new analysis resets the lookup; inherited finalizers and
   construction cleanup remain identical.

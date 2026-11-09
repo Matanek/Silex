@@ -1726,7 +1726,7 @@ fn compileLlvmOptions(
         compiler.index,
     );
 
-    const backend_input = try BackendTransfer.transfer(allocator, init.gpa, .{
+    const backend_input = try BackendTransfer.transfer(allocator, .{
         .ir = compilation.ir,
         .boundaries = compilation.boundaries,
         .providers = boundary_providers,
@@ -1991,7 +1991,7 @@ fn compileNativeOptions(
                 compiler.index,
             );
         }
-        const backend_input = try BackendTransfer.transfer(allocator, init.gpa, .{
+        const backend_input = try BackendTransfer.transfer(allocator, .{
             .ir = compilation.ir,
             .boundaries = boundaries,
             .providers = boundary_providers,

@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le transfert du programme vers les backends copie directement les descripteurs
+  typés, sans sérialisation JSON intermédiaire. Les métadonnées et leur durée de
+  vie sont conservées, avec moins de conversion pendant la compilation.
+
 - L’analyse partage les plans de destruction identiques entre les opérations
   d’un même programme. Leur remise à zéro accompagne chaque nouvelle analyse ;
   les finaliseurs hérités et le nettoyage des constructions restent identiques.
