@@ -8,6 +8,13 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le lien natif Windows ARM64 utilise directement UCRT et un petit démarrage
+  intégré au compilateur pour éviter la reconstruction globale de MinGW.
+  Les objets COFF et le cache existant sont conservés ; les archives qui
+  nécessitent des helpers, constructeurs, relocations GNU ou callbacks TLS
+  gardent la liaison de compatibilité après inspection du résultat du linker.
+  L’émission croisée et l’exécution native ont des contrôles distincts.
+
 - Le banc de compilation conserve les sorties partielles et les fichiers de
   phase en cas d’attente, puis arrête ses processus enfants sur expiration.
   Le diagnostic initial Windows ARM64 distingue cette observation des budgets

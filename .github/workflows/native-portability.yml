@@ -1313,7 +1313,8 @@ jobs:
           if ($managedZigMachine -ne 0x8664) {
             throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"
           }
-          python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows --initial-compile-timeout 300
+          python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows --cold-link-cache
+          python Toolchain/Tools/VerifyWindowsStartup.py $silex $boundaryArchive
           $shaderMachine = Get-PeMachine $shadercross
           if ($shaderMachine -ne 0x8664) {
             throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"
@@ -1387,10 +1388,14 @@ jobs:
           & $silex compile --backend native $boundaryMain --release --nocache -o $boundaryRelease
           Assert-Arm64Pe $boundaryDebug
           Assert-Arm64Pe $boundaryRelease
-          $boundaryDebugOutput = @(Invoke-NativeCapture $boundaryDebug)
-          $boundaryReleaseOutput = @(Invoke-NativeCapture $boundaryRelease)
-          if ($boundaryDebugOutput.Count -ne 1 -or $boundaryDebugOutput[0] -ne "windows arm64 boundary ready" -or
-              $boundaryReleaseOutput.Count -ne 1 -or $boundaryReleaseOutput[0] -ne "windows arm64 boundary ready") {
+          $env:SILEX_WINDOWS_STARTUP_PROBE = "verify"
+          $boundaryDebugOutput = @(Invoke-NativeCapture $boundaryDebug -Arguments @("simple", "moteur-été"))
+          $boundaryReleaseOutput = @(Invoke-NativeCapture $boundaryRelease -Arguments @("simple", "moteur-été"))
+          Remove-Item Env:SILEX_WINDOWS_STARTUP_PROBE
+          if ($boundaryDebugOutput.Count -ne 2 -or $boundaryDebugOutput[0] -ne "windows arm64 boundary ready" -or
+              $boundaryDebugOutput[1] -ne "windows arm64 finalized" -or
+              $boundaryReleaseOutput.Count -ne 2 -or $boundaryReleaseOutput[0] -ne "windows arm64 boundary ready" -or
+              $boundaryReleaseOutput[1] -ne "windows arm64 finalized") {
             throw "Windows ARM64 Boundary smoke failed"
           }
 

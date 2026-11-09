@@ -8,6 +8,13 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native Windows ARM64 linking uses UCRT directly and a small startup embedded
+  in the compiler, avoiding a full MinGW rebuild. COFF objects and the existing
+  cache remain in use; archives that require GNU helpers, constructors,
+  relocations or TLS callbacks retain the compatibility link after inspecting
+  the linker output. Cross-emission and native execution have separate validation
+  gates.
+
 - Compilation probes retain partial output and file-phase evidence while
   waiting, then stop their child processes on timeout. The initial Windows
   ARM64 diagnostic keeps observation limits separate from latency budgets

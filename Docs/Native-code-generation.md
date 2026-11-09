@@ -266,12 +266,27 @@ object for the selected target: ARM64 or X64 Mach-O, x64 or AArch64 ELF, or
 x64/ARM64 COFF. On macOS, the managed Zig linker runs without its automatic
 standard libraries; Silex supplies `libSystem` and Apple's granular target
 runtime explicitly. Platform availability helpers are therefore resolved
-without pulling Zig's monolithic compiler-rt math implementations. Other
-systems keep the regular managed Zig bootstrap link. Both paths receive only
+without pulling Zig's monolithic compiler-rt math implementations. Windows
+ARM64 retains COFF and links directly to UCRT with a compiler-owned startup
+object. That entry initializes narrow/wide arguments and environments, runs
+native initializers, provides the PE TLS directory, and exits through UCRT to
+run finalizers and flush streams. The temporary startup object is deleted after
+linking and adds no persistent cache. Before publishing the executable, a small
+private PE section identifies the linker's GNU constructor, destructor and
+pseudo-relocation tables. Nonempty tables, dynamic TLS callbacks or unresolved
+GNU archive helpers select the previous compatibility link. Inspection reads
+only the headers and table prefixes, not another complete copy of the executable.
+Linux and Windows X64 keep their regular managed Zig bootstrap link. These paths receive only
 the resolved package archives, declared Apple frameworks, and named system
 libraries. Provider archives are production artifacts and must not retain
 sanitizer-runtime dependencies. These paths do not compile foreign sources and
 do not define a stable Silex object format or ABI.
+
+The direct Windows ARM64 startup is cross-emitted locally. Its native gate
+uses a fresh disposable SDK cache and an archive checking initializers, TLS on
+two threads, Unicode arguments and finalization in Debug and Release. Until
+that gate passes on the exact candidate, cross-emission establishes neither
+Windows execution correctness nor a native latency gain.
 
 Package platform adapters may call a raw function-table entry through
 `C.call<func(...) T>`. Semantic analysis records its checked C signature in

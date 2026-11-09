@@ -55,6 +55,21 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .aarch64,
         .os_tag = .linux,
     });
+    const windows_startup = b.addObject(.{
+        .name = "silex-windows-startup",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("Runtime/WindowsStartup.zig"),
+            .target = b.resolveTargetQuery(.{ .cpu_arch = .aarch64, .os_tag = .windows, .abi = .gnu, .cpu_model = .baseline }),
+            .optimize = .ReleaseSmall,
+        }),
+    });
+    const windows_startup_files = b.addWriteFiles();
+    _ = windows_startup_files.addCopyFile(windows_startup.getEmittedBin(), "startup.obj");
+    const windows_startup_import = windows_startup_files.add(
+        "WindowsStartupObject.zig",
+        "pub const object_bytes = @embedFile(\"startup.obj\");\n",
+    );
+    module.addAnonymousImport("windows_startup_object", .{ .root_source_file = windows_startup_import });
     const float_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/FloatFormat.zig"),
         .target = runtime_target,
@@ -551,7 +566,7 @@ pub fn build(b: *std.Build) void {
     b.step("test-debug-copies", "Verify Debug stack copy cleanup and diagnostic provenance").dependOn(&debug_copy_command.step);
     // Shared compilation work and retention must remain covered on every host,
     // including the active-alias oracle omitted by the former narrow filter.
-    const local_compilation_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "backend input", "IR validation", "write deterministic typed IR", "Debug copy cleanup", "stack copies forward", "stack forwarding", "cache key", "artifact keys", "compiler generation", "working set", "rolling retention", "corrupt cache", "materialized executable" } });
+    const local_compilation_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "Windows startup", "backend input", "IR validation", "write deterministic typed IR", "Debug copy cleanup", "stack copies forward", "stack forwarding", "cache key", "artifact keys", "compiler generation", "working set", "rolling retention", "corrupt cache", "materialized executable" } });
     local_compilation_tests.stack_size = test_stack_size;
     const local_compilation_command = b.addRunArtifact(local_compilation_tests);
     local_compilation_command.setCwd(b.path(""));

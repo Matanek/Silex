@@ -1,6 +1,7 @@
 const std = @import("std");
 const Packages = @import("Packages.zig");
 const TargetModule = @import("Target.zig");
+const WindowsStartup = @import("Windows/Startup.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -68,13 +69,57 @@ pub fn executable(
     };
     std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
     for (libraries.items) |library| try arguments.append(allocator, try std.fmt.allocPrint(allocator, "-l{s}", .{library}));
-    const result = try std.process.run(allocator, io, .{ .argv = arguments.items });
+    // Keep COFF relocation and provider linking. Only the startup changes: the
+    // normal Windows path needs UCRT, not Zig's entire MinGW compatibility CRT.
+    // This object is a compiler runtime payload, like the float/deep-copy
+    // runtimes, and is removed after linking instead of creating another cache.
+    const startup_path = if (target.eql(.windows_arm64))
+        try std.fmt.allocPrint(allocator, "{s}.startup.obj", .{object_path})
+    else
+        null;
+    defer if (startup_path) |path| Io.Dir.cwd().deleteFile(io, path) catch {};
+    var result = if (startup_path) |path| fast: {
+        {
+            const file = try Io.Dir.cwd().createFile(io, path, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, @import("windows_startup_object").object_bytes);
+        }
+        var direct: std.ArrayList([]const u8) = .empty;
+        try direct.appendSlice(allocator, arguments.items);
+        try direct.appendSlice(allocator, &.{ "-nostdlib", "-Wl,-e,silex_windows_start", path, "-lucrtbase", "-lkernel32" });
+        break :fast try std.process.run(allocator, io, .{ .argv = direct.items });
+    } else try std.process.run(allocator, io, .{ .argv = arguments.items });
+    if (startup_path != null) {
+        // A successful link can still contain GNU constructors or pseudo
+        // relocations. Inspect the linker's tables before publishing/executing.
+        var compatibility = if (succeeded(result.term)) inspect: {
+            const file = try Io.Dir.cwd().openFile(io, output_path, .{});
+            defer file.close(io);
+            break :inspect try WindowsStartup.requiresCompatibility(file, io);
+        } else false;
+        if (!succeeded(result.term) and std.mem.indexOf(u8, result.stderr, "undefined symbol:") != null) {
+            for (providers) |provider| if (provider.archive != null) {
+                compatibility = true;
+                break;
+            };
+        }
+        if (compatibility) {
+            result = try std.process.run(allocator, io, .{ .argv = arguments.items });
+        }
+    }
     switch (result.term) {
         .exited => |code| if (code == 0) return,
         else => {},
     }
     if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
     return error.LinkFailed;
+}
+
+fn succeeded(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
 }
 
 fn stringLessThan(_: void, left: []const u8, right: []const u8) bool {
