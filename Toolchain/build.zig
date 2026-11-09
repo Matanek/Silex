@@ -540,6 +540,10 @@ pub fn build(b: *std.Build) void {
         .optimize = test_optimize,
     });
     for (module.import_table.keys(), module.import_table.values()) |name, imported| test_module.addImport(name, imported);
+    const native_probe_tools = b.addOptions();
+    native_probe_tools.addOption(bool, "emit_native_probes", b.option(bool, "emit-native-probes", "Build native scalar-cache probes with the unit regression") orelse false);
+    native_probe_tools.addOption([]const u8, "zig_exe", b.graph.zig_exe);
+    test_module.addOptions("native_probe_tools", native_probe_tools);
     if (target.result.os.tag == .windows) {
         test_module.linkSystemLibrary("crypt32", .{});
         test_module.linkSystemLibrary("shell32", .{});
@@ -729,6 +733,7 @@ pub fn build(b: *std.Build) void {
         .optimize = test_optimize,
     });
     lsp_test_module.addOptions("build_options", build_options);
+    lsp_test_module.addOptions("native_probe_tools", native_probe_tools);
     const native_callback_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "C callback completion", "terminal member expression from its static type" } });
     native_callback_completion_tests.stack_size = test_stack_size;
     const native_callback_completion_command = b.addRunArtifact(native_callback_completion_tests);

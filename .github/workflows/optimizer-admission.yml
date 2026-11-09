@@ -31,7 +31,7 @@ jobs:
         with:
           repository: Matanek/Silex-Lib-STD
           # Shared with the optimizer X64 qualification fixture.
-          ref: 80aabd9a2de919af52dc0b8bf2d0f9de50aa75c5
+          ref: 40f463e504d390d1877e9e82bb1a2a60fb46f2e8
           path: Dependencies/STD
 
       - name: Register the pinned STD package for hermetic checks

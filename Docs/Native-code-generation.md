@@ -394,9 +394,12 @@ bits. This rule applies to Darwin, Linux and Windows ARM64 emission; X64 does
 not use this cache. The machine regression covers float32/float64 constants,
 negation and arithmetic independently of register placement.
 
-`zig build test-debug-copies` also writes six independent Linux/Windows ARM64
+`zig build test-debug-copies -Demit-native-probes=true` writes six independent Linux/Windows ARM64
 probes under `.zig-cache/native-scalar-cache`, using the production object writers
 and linker. The native portability workflow
+supplies the explicit build role; ordinary unit tests only check encoding and
+host execution, without spawning cross-linkers. Probe generation uses the exact
+Zig executable selected by the build graph rather than searching `PATH`. The workflow
 executes the Linux probes locally and transfers the exact PE probes from its
 Windows bootstrap builder to the ARM64 runner. Each output is compared with
 its expected bits, and the executable architecture is checked before launch.

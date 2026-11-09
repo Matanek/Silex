@@ -406,7 +406,7 @@ jobs:
         with:
           repository: Matanek/Silex-Lib-STD
           # v0.22.0 includes the isolated System provider for macOS X64.
-          ref: 80aabd9a2de919af52dc0b8bf2d0f9de50aa75c5
+          ref: 40f463e504d390d1877e9e82bb1a2a60fb46f2e8
           path: Dependencies/STD
 
       - name: Install Zig 0.16.0
@@ -534,7 +534,7 @@ jobs:
         with:
           repository: Matanek/Silex-Lib-STD
           # v0.22.0 supplies the Linux ARM64 provider graph used by Math fixtures.
-          ref: 80aabd9a2de919af52dc0b8bf2d0f9de50aa75c5
+          ref: 40f463e504d390d1877e9e82bb1a2a60fb46f2e8
           path: Dependencies/STD
 
       - name: Verify native ARM64 runner
@@ -725,7 +725,7 @@ jobs:
       - name: Execute stack-only scalar cache regressions on Linux ARM64
         shell: bash
         run: |
-          zig build test-debug-copies --build-file Toolchain/build.zig
+          zig build test-debug-copies -Demit-native-probes=true --build-file Toolchain/build.zig
           python3 .github/scripts/verify-native-scalar-cache.py linux-arm64 Toolchain/.zig-cache/native-scalar-cache
           SILEX_DATA_ROOT="$RUNNER_TEMP/home/.silex" python3 .github/scripts/verify-consumer-module-paths.py "$RUNNER_TEMP/silex-prefix/bin/silex"
 
@@ -742,7 +742,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Matanek/Silex-Lib-STD
-          ref: 5a018305fb470dfe00e94466150b3c04f207e252
+          ref: 40f463e504d390d1877e9e82bb1a2a60fb46f2e8
           path: Dependencies/STD
 
       - name: Install Zig 0.16.0
@@ -912,7 +912,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Matanek/Silex-Lib-STD
-          ref: 5a018305fb470dfe00e94466150b3c04f207e252
+          ref: 40f463e504d390d1877e9e82bb1a2a60fb46f2e8
           path: Dependencies/STD
 
       - name: Install Zig 0.16.0
@@ -1170,7 +1170,7 @@ jobs:
             -target aarch64-windows \
             -femit-bin="$stage/boundary/BoundaryProbe.lib"
           test "$(head -c 8 "$stage/boundary/BoundaryProbe.lib")" = "!<arch>"
-          zig build test-debug-copies --build-file Toolchain/build.zig
+          zig build test-debug-copies -Demit-native-probes=true --build-file Toolchain/build.zig
           mkdir -p "$stage/cache-probes"
           cp Toolchain/.zig-cache/native-scalar-cache/windows-arm64-* "$stage/cache-probes/"
 

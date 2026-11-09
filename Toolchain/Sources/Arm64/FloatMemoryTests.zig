@@ -528,7 +528,9 @@ test "Debug copy cleanup scalar cache observes floating writes to reused stack s
                 try std.testing.expectEqual(Machine.Status.success, result.status);
                 try std.testing.expectEqual(case.expected, @as(u64, @bitCast(result.value)));
             }
-            try writeScalarCacheProbe(allocator, function, case.expected, double, case_index);
+            if (@import("native_probe_tools").emit_native_probes) {
+                try writeScalarCacheProbe(allocator, function, case.expected, double, case_index);
+            }
         }
     }
 }
@@ -567,7 +569,7 @@ fn writeScalarCacheProbe(allocator: std.mem.Allocator, original: Machine.Functio
         try @import("../NativeLink.zig").executable(
             allocator,
             std.testing.io,
-            "zig",
+            @import("native_probe_tools").zig_exe,
             if (windows) .windows_arm64 else .linux_arm64,
             object_path,
             path,
