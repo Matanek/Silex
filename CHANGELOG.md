@@ -6,7 +6,19 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
-## [Unreleased]
+## [0.48.0] - 2026-11-09
+
+### Why upgrade?
+
+This release introduces one implementation per `Result` operation, default
+protocol methods, and explicitly rounded floating-point conversions. It fixes
+callback, collection, and composed native-program behavior while reducing
+compilation work for large applications. Ecosystem packages publish their own
+features and versions; these are not included in the compiler binary.
+
+### Changes
+
+- Correct ARM64 stack-slot reuse after floating-point writes: stale integer bits no longer hide the current result. Constants, unary operations and arithmetic are covered in Debug and Release on ARM64 targets; the X64 backend does not share this cache.
 
 - Native Windows ARM64 linking uses UCRT directly and a small startup embedded
   in the compiler, avoiding a full MinGW rebuild. COFF objects and the existing
@@ -67,18 +79,6 @@ This editorial history starts with version 0.44.1.
   already been invalidated until a new known fact is written. Branches, joins,
   and arena changes preserve the validity of this reuse without changing
   diagnostics or capture rules.
-
-## [0.48.0] - 2026-11-08
-
-### Why upgrade?
-
-This release introduces one implementation per `Result` operation, default
-protocol methods, and explicitly rounded floating-point conversions. It fixes
-callback, collection, and composed native-program behavior while reducing
-compilation work for large applications. Ecosystem packages publish their own
-features and versions; these are not included in the compiler binary.
-
-### Changes
 
 - Fix generic call inference inside `indexed()` loops: elements retain their collection type and indices retain `int`, including in nested loops. Borrowing and copying modes remain unchanged.
 

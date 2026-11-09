@@ -378,3 +378,19 @@ X64 list elements retain their eight-byte machine slots, including float32;
 logical sample counts do not describe physical reserved bytes. The portable
 `LargeCollectionGrowth.sx` fixture checks a million float32 elements, shared
 snapshots and subsequent mutation, alongside the owning-element fixtures.
+
+## Floating writes and the ARM64 integer cache
+
+The stack-only ARM64 emitter caches scalar integer copies in two scratch
+registers. Floating constants, unary operations and arithmetic write their
+stack homes through a separate path, so they terminate that cache region.
+A later integer copy of the same reused slot must reload the newly written
+bits. This rule applies to Darwin, Linux and Windows ARM64 emission; X64 does
+not use this cache. The machine regression covers float32/float64 constants,
+negation and arithmetic independently of register placement.
+
+`zig build test-debug-copies` also writes six independent Linux/Windows ARM64
+probes under `.zig-cache/native-scalar-cache`. The native portability workflow
+executes the Linux probes locally and transfers the exact PE probes from its
+Windows bootstrap builder to the ARM64 runner. Each output is compared with
+its expected bits, and the executable architecture is checked before launch.

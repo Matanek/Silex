@@ -722,6 +722,12 @@ jobs:
             "$RUNNER_TEMP/silex-prefix/bin/silex" \
             "$RUNNER_TEMP/signed-storage"
 
+      - name: Execute stack-only scalar cache regressions on Linux ARM64
+        shell: bash
+        run: |
+          zig build test-debug-copies --build-file Toolchain/build.zig
+          python3 .github/scripts/verify-native-scalar-cache.py linux-arm64 Toolchain/.zig-cache/native-scalar-cache
+
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
     runs-on: ubuntu-24.04
@@ -1163,6 +1169,9 @@ jobs:
             -target aarch64-windows \
             -femit-bin="$stage/boundary/BoundaryProbe.lib"
           test "$(head -c 8 "$stage/boundary/BoundaryProbe.lib")" = "!<arch>"
+          zig build test-debug-copies --build-file Toolchain/build.zig
+          mkdir -p "$stage/cache-probes"
+          cp Toolchain/.zig-cache/native-scalar-cache/windows-arm64-* "$stage/cache-probes/"
 
       - name: Transfer the Windows ARM64 bootstrap
         uses: actions/upload-artifact@v4
@@ -1187,6 +1196,12 @@ jobs:
         with:
           name: windows-arm64-bootstrap
           path: ${{ runner.temp }}/windows-arm64-bootstrap
+
+      - name: Execute stack-only scalar cache regressions on Windows ARM64
+        shell: pwsh
+        run: |
+          python .github/scripts/verify-native-scalar-cache.py windows-arm64 "$env:RUNNER_TEMP/windows-arm64-bootstrap/cache-probes"
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 scalar cache regression" }
 
       - name: Build and validate Silex natively on Windows ARM64
         shell: pwsh

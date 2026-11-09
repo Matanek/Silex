@@ -479,3 +479,99 @@ test "wide float32 collection loads insert both resident SIMD lanes" {
     try std.testing.expectEqual(Machine.Status.success, result.status);
     try std.testing.expectEqual(floatBits(10, false), result.value);
 }
+
+test "Debug copy cleanup scalar cache observes floating writes to reused stack slots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]bool{ false, true }) |double| {
+        const numeric: @import("../Types.zig").Type = if (double) .float64 else .float32;
+        const one: u64 = @bitCast(floatBits(1, double));
+        const two: u64 = @bitCast(floatBits(2, double));
+        const negative: u64 = @bitCast(floatBits(-1, double));
+        const cases = [_]struct { write: Machine.Instruction, expected: u64 }{
+            .{ .write = if (double)
+                .{ .constant_float64 = .{ .result = 1, .bits = two } }
+            else
+                .{ .constant_float32 = .{ .result = 1, .bits = @intCast(two) } }, .expected = two },
+            .{ .write = .{ .unary = .{ .result = 1, .operand = 0, .operator = .negate, .type = numeric } }, .expected = negative },
+            .{ .write = .{ .binary = .{ .result = 1, .left = 0, .right = 0, .operator = .subtract, .type = numeric } }, .expected = 0 },
+        };
+        for (cases, 0..) |case, case_index| {
+            const instructions = [_]Machine.Instruction{
+                .{ .constant_int = .{ .result = 0, .bits = one } },
+                .{ .copy = .{ .result = 1, .operand = 0 } },
+                case.write,
+                .{ .copy = .{ .result = 2, .operand = 1 } },
+                .{ .return_value = .{ .start = 2, .width = 1 } },
+            };
+            const function: Machine.Function = .{
+                .name = "floating_stack_cache",
+                .parameter_count = 0,
+                .return_type = .int,
+                .return_width = 1,
+                .slot_count = 3,
+                .frame_size = try Machine.frameSize(3),
+                .instructions = &instructions,
+            };
+            const program: Machine.Program = .{ .functions = &.{function} };
+            for ([_]Encoder.Platform{ .darwin, .linux, .windows }) |platform| {
+                const image = try switch (platform) {
+                    .darwin => Encoder.encode(allocator, program, .none),
+                    .linux => Encoder.encodeLinux(allocator, program, .none),
+                    .windows => Encoder.encodeWindows(allocator, program, .none),
+                };
+                try std.testing.expect(image.code.len != 0);
+            }
+            if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
+                const result = try Runner.invoke(allocator, program, 0, &.{});
+                try std.testing.expectEqual(Machine.Status.success, result.status);
+                try std.testing.expectEqual(case.expected, @as(u64, @bitCast(result.value)));
+            }
+            try writeScalarCacheProbe(allocator, function, case.expected, double, case_index);
+        }
+    }
+}
+
+// Standalone probes let native CI execute the exact stack-only machine form,
+// including on Windows ARM64 where the bootstrap is built on Linux.
+fn writeScalarCacheProbe(allocator: std.mem.Allocator, original: Machine.Function, expected: u64, double: bool, case_index: usize) !void {
+    const instructions = try allocator.alloc(Machine.Instruction, original.instructions.len + 1);
+    @memcpy(instructions[0 .. original.instructions.len - 1], original.instructions[0 .. original.instructions.len - 1]);
+    instructions[original.instructions.len - 1] = .{ .print = .{ .value = 2, .kind = .unsigned_integer, .newline = true } };
+    instructions[original.instructions.len] = .return_void;
+    var function = original;
+    function.return_type = .void;
+    function.return_width = 0;
+    function.instructions = instructions;
+    const program: Machine.Program = .{ .functions = &.{function} };
+    const directory = ".zig-cache/native-scalar-cache";
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, directory);
+    for ([_]bool{ false, true }) |windows| {
+        const image = try if (windows)
+            Encoder.encodeWindows(allocator, program, .{ .executable_main = 0 })
+        else
+            Encoder.encodeLinux(allocator, program, .{ .executable_main = 0 });
+        const bytes = if (windows) windows: {
+            const Imports = @import("../Windows/Imports.zig");
+            const sites = try allocator.alloc(Imports.Arm64Site, image.external_call_sites.len);
+            for (image.external_call_sites, sites) |site, *mapped| mapped.* = .{
+                .instruction_offset = site.instruction_offset,
+                .symbol = site.windows_symbol orelse return error.InvalidMachineProgram,
+            };
+            break :windows try @import("../Windows/PE.zig").emitArm64(allocator, image.code, image.entry_offset.?, sites);
+        } else try @import("../Linux/Elf.zig").emit(allocator, .arm64, image.code, image.entry_offset.?);
+        const path = try std.fmt.allocPrint(allocator, "{s}/{s}-float{d}-{d}{s}", .{
+            directory,                                    if (windows) @as([]const u8, "windows-arm64") else "linux-arm64",
+            if (double) @as(u8, 64) else 32,              case_index,
+            if (windows) @as([]const u8, ".exe") else "",
+        });
+        const executable = try std.Io.Dir.cwd().createFile(std.testing.io, path, .{});
+        defer executable.close(std.testing.io);
+        try executable.writeStreamingAll(std.testing.io, bytes);
+        const expected_path = try std.fmt.allocPrint(allocator, "{s}.expected", .{path});
+        const output = try std.Io.Dir.cwd().createFile(std.testing.io, expected_path, .{});
+        defer output.close(std.testing.io);
+        try output.writeStreamingAll(std.testing.io, try std.fmt.allocPrint(allocator, "{d}\n", .{expected}));
+    }
+}

@@ -5322,12 +5322,12 @@ fn scalarCacheInstruction(instruction: Machine.Instruction) bool {
     return switch (instruction) {
         .constant_int,
         .constant_bool,
-        .constant_float32,
-        .constant_float64,
         .copy,
-        .unary,
         => true,
-        .binary => |binary| binary.type != .str,
+        // Floating emitters write stack homes without updating this integer
+        // cache. A reused slot must not retain bits from an earlier copy.
+        .unary => |unary| !unary.type.isFloat(),
+        .binary => |binary| binary.type != .str and !binary.type.isFloat(),
         else => false,
     };
 }

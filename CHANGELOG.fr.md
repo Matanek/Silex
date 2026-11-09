@@ -6,7 +6,21 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
-## [Unreleased]
+## [0.48.0] - 2026-11-09
+
+### Pourquoi mettre à jour ?
+
+Cette version fait évoluer la gestion des erreurs avec une implémentation unique
+par opération `Result`, ajoute les méthodes de protocole par défaut et les
+conversions flottantes à arrondi explicite. Elle fiabilise les callbacks,
+les collections et les programmes natifs composés, tout en réduisant le travail
+de compilation des grandes applications. Les packages de l’écosystème publient
+leurs propres nouveautés et versions ; elles ne sont pas incluses dans le binaire
+du compilateur.
+
+### Changements
+
+- Corriger la réutilisation des emplacements mémoire après les calculs flottants ARM64 : une ancienne valeur entière ne masque plus le résultat courant. La correction couvre les constantes, opérations unaires et calculs en Debug et Release sur les cibles ARM64 ; le backend X64 ne partage pas ce cache.
 
 - Le lien natif Windows ARM64 utilise directement UCRT et un petit démarrage
   intégré au compilateur pour éviter la reconstruction globale de MinGW.
@@ -70,20 +84,6 @@ Cet historique éditorial commence à la version 0.44.1.
   faits mutables ont déjà été invalidés, tant qu’aucun nouveau fait connu n’est
   écrit. Les branches, jonctions et changements d’arena préservent la validité
   de cette réutilisation sans modifier les diagnostics ni les règles de capture.
-
-## [0.48.0] - 2026-11-08
-
-### Pourquoi mettre à jour ?
-
-Cette version fait évoluer la gestion des erreurs avec une implémentation unique
-par opération `Result`, ajoute les méthodes de protocole par défaut et les
-conversions flottantes à arrondi explicite. Elle fiabilise les callbacks,
-les collections et les programmes natifs composés, tout en réduisant le travail
-de compilation des grandes applications. Les packages de l’écosystème publient
-leurs propres nouveautés et versions ; elles ne sont pas incluses dans le binaire
-du compilateur.
-
-### Changements
 
 - Corriger l’inférence des appels génériques dans les boucles `indexed()` : l’élément conserve son type de collection et l’indice son type `int`, y compris dans les boucles imbriquées. Les modes d’emprunt et de copie restent inchangés.
 
