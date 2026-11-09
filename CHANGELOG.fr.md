@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La validation de l’IR conserve les contrôles du writer sans formater ni
+  allouer de texte jeté. L’export textuel reste déterministe ; les indices
+  globaux et cibles d’appels dynamiques sont vérifiés explicitement.
+
 - La génération native suit uniquement les alias de stockage actifs pendant
   le nettoyage des copies. Elle évite les parcours répétés des autres stockages
   et conserve les mêmes invalidations, sans ajouter de cache persistant.

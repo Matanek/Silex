@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- IR validation retains the writer checks without formatting or allocating
+  discarded text. Explicit text output remains deterministic, and global indices
+  and dynamic-call targets are checked explicitly.
+
 - Native copy cleanup tracks only active storage aliases, avoiding repeated
   scans of other slots while retaining the same invalidations. This temporary
   tracking adds no persistent cache.

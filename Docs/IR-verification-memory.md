@@ -4,12 +4,19 @@ Optimizer verification borrows the program and returns no owned IR. Each checked
 pass therefore owns an independent temporary arena, released before the next
 pass. `verify_each_pass` and the set of verified passes keep their policy.
 
-`Ir.validate` uses the same metadata and function formatting checks as
-`Ir.writeText`, then reuses scratch between functions. It avoids retaining a
-complete textual program when the caller only needs validation. Explicit IR
-output still uses `writeText` and preserves its deterministic format. CFG
-verification likewise reuses its facts between independent functions. No check
-is removed, and the transformation passes and native encoders are unchanged.
+`Ir.validate` traverses the same declarations and instructions as `Ir.writeText`
+through the shared `Ir/Text.zig` writer, using a discard output. Formatting,
+escaping and text allocation are skipped; type, width, ownership and reference
+checks still execute. Explicit text output retains the deterministic format.
+Global indices and dynamic call target bounds are checked before a name is
+accessed, so an invalid reference produces `InvalidProgram` rather than relying
+on a formatting access.
+
+The no-text path can validate with a zero-capacity allocator. Its differential
+tests compare errors with text output, including invalid results, locals, globals,
+calls, branches and types. CFG verification remains separate and reuses its own scratch
+between functions. No optimizer pass or verification policy is disabled, and no
+persistent cache is introduced.
 
 ## Correctness and resource gates
 
