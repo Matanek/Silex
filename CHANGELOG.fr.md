@@ -20,6 +20,9 @@ du compilateur.
 
 ### Changements
 
+- Un consommateur placé sous le dossier de sa dépendance conserve ses modules frères avec un chemin d’entrée absolu ou relatif. La découverte du compilateur et de l’éditeur exclut uniquement les dépendances descendantes, sans masquer le consommateur sous une dépendance parente.
+- Sous Windows ARM64, une dépendance déclarant le runtime C++ conserve son démarrage CRT complet ; la liaison ne combine plus ce dernier avec le démarrage UCRT autonome et ses symboles TLS.
+- Les échecs de liaison native indiquent aussi le statut du processus et sa sortie standard, afin de distinguer une erreur de symboles d’un arrêt du linker.
 - Corriger la réutilisation des emplacements mémoire après les calculs flottants ARM64 : une ancienne valeur entière ne masque plus le résultat courant. La correction couvre les constantes, opérations unaires et calculs en Debug et Release sur les cibles ARM64 ; le backend X64 ne partage pas ce cache.
 
 - Le lien natif Windows ARM64 utilise directement UCRT et un petit démarrage

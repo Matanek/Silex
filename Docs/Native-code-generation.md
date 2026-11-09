@@ -276,6 +276,11 @@ private PE section identifies the linker's GNU constructor, destructor and
 pseudo-relocation tables. Nonempty tables, dynamic TLS callbacks or unresolved
 GNU archive helpers select the previous compatibility link. Inspection reads
 only the headers and table prefixes, not another complete copy of the executable.
+An explicitly requested C++ standard runtime (`stdc++` or `c++`) selects that
+compatibility link before emission: Zig supplies the CRT startup for this
+runtime, which cannot be combined with the standalone UCRT startup. The native
+startup fixture also runs with the C++ runtime declared and checks initializer,
+callback and finalizer output in Debug and Release.
 Linux and Windows X64 keep their regular managed Zig bootstrap link. These paths receive only
 the resolved package archives, declared Apple frameworks, and named system
 libraries. Provider archives are production artifacts and must not retain
@@ -390,7 +395,8 @@ not use this cache. The machine regression covers float32/float64 constants,
 negation and arithmetic independently of register placement.
 
 `zig build test-debug-copies` also writes six independent Linux/Windows ARM64
-probes under `.zig-cache/native-scalar-cache`. The native portability workflow
+probes under `.zig-cache/native-scalar-cache`, using the production object writers
+and linker. The native portability workflow
 executes the Linux probes locally and transfers the exact PE probes from its
 Windows bootstrap builder to the ARM64 runner. Each output is compared with
 its expected bits, and the executable architecture is checked before launch.

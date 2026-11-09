@@ -548,27 +548,31 @@ fn writeScalarCacheProbe(allocator: std.mem.Allocator, original: Machine.Functio
     const directory = ".zig-cache/native-scalar-cache";
     try std.Io.Dir.cwd().createDirPath(std.testing.io, directory);
     for ([_]bool{ false, true }) |windows| {
-        const image = try if (windows)
-            Encoder.encodeWindows(allocator, program, .{ .executable_main = 0 })
-        else
-            Encoder.encodeLinux(allocator, program, .{ .executable_main = 0 });
-        const bytes = if (windows) windows: {
-            const Imports = @import("../Windows/Imports.zig");
-            const sites = try allocator.alloc(Imports.Arm64Site, image.external_call_sites.len);
-            for (image.external_call_sites, sites) |site, *mapped| mapped.* = .{
-                .instruction_offset = site.instruction_offset,
-                .symbol = site.windows_symbol orelse return error.InvalidMachineProgram,
-            };
-            break :windows try @import("../Windows/PE.zig").emitArm64(allocator, image.code, image.entry_offset.?, sites);
-        } else try @import("../Linux/Elf.zig").emit(allocator, .arm64, image.code, image.entry_offset.?);
         const path = try std.fmt.allocPrint(allocator, "{s}/{s}-float{d}-{d}{s}", .{
             directory,                                    if (windows) @as([]const u8, "windows-arm64") else "linux-arm64",
             if (double) @as(u8, 64) else 32,              case_index,
             if (windows) @as([]const u8, ".exe") else "",
         });
-        const executable = try std.Io.Dir.cwd().createFile(std.testing.io, path, .{});
-        defer executable.close(std.testing.io);
-        try executable.writeStreamingAll(std.testing.io, bytes);
+        const object = if (windows)
+            try @import("Object.zig").emitWindowsFunction(allocator, program, 0)
+        else
+            try @import("Object.zig").emitLinuxFunction(allocator, program, 0);
+        const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{path});
+        {
+            const file = try std.Io.Dir.cwd().createFile(std.testing.io, object_path, .{});
+            defer file.close(std.testing.io);
+            try file.writeStreamingAll(std.testing.io, object);
+        }
+        defer std.Io.Dir.cwd().deleteFile(std.testing.io, object_path) catch {};
+        try @import("../NativeLink.zig").executable(
+            allocator,
+            std.testing.io,
+            "zig",
+            if (windows) .windows_arm64 else .linux_arm64,
+            object_path,
+            path,
+            &.{},
+        );
         const expected_path = try std.fmt.allocPrint(allocator, "{s}.expected", .{path});
         const output = try std.Io.Dir.cwd().createFile(std.testing.io, expected_path, .{});
         defer output.close(std.testing.io);

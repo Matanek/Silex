@@ -320,3 +320,21 @@ test "module roots and native heap qualification retain the complete evidence" {
         "Toolchain/Root.zig", "Toolchain/Benchmarks/Optimizer/Assurance.json",
     }));
 }
+
+test "native cache and startup verifiers retain quick and target evidence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const manifest = try load(arena.allocator(), std.testing.io, "Benchmarks/Optimizer");
+    try audit(manifest);
+    for ([_][]const u8{
+        "Toolchain/Tools/VerifyCacheProcess.py",
+        "Toolchain/Tools/VerifyCacheRetention.py",
+        "Toolchain/Tools/VerifyWindowsStartup.py",
+    }) |path| {
+        const selection = try plan(arena.allocator(), manifest, &.{path});
+        const quick = findCheck(manifest, "optimizer-admission-quick").?;
+        const native = findCheck(manifest, "native-portability-matrix").?;
+        try std.testing.expect(selection.checks[quick]);
+        try std.testing.expect(selection.checks[native]);
+    }
+}

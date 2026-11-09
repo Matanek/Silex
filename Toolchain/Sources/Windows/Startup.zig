@@ -1,5 +1,22 @@
 const std = @import("std");
 
+// Requesting a C++ standard runtime also requests Zig's CRT startup. Mixing
+// that startup with the standalone UCRT payload defines atexit/TLS twice.
+// This is a declared runtime requirement, independent of archive filenames.
+pub fn requiresRuntime(libraries: []const []const u8) bool {
+    for (libraries) |library| {
+        if (std.mem.eql(u8, library, "stdc++") or std.mem.eql(u8, library, "c++")) return true;
+    }
+    return false;
+}
+
+test "explicit C++ runtimes retain their CRT startup" {
+    try std.testing.expect(!requiresRuntime(&.{ "ucrtbase", "kernel32" }));
+    try std.testing.expect(!requiresRuntime(&.{}));
+    try std.testing.expect(requiresRuntime(&.{ "kernel32", "stdc++" }));
+    try std.testing.expect(requiresRuntime(&.{ "c++", "kernel32" }));
+}
+
 // Inspect the linker's actual requirements, not archive names or compiler
 // guesses. Read at most the PE headers, our marker and two table prefixes;
 // large executables do not require another complete file read.

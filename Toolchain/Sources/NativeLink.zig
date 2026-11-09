@@ -73,7 +73,7 @@ pub fn executable(
     // normal Windows path needs UCRT, not Zig's entire MinGW compatibility CRT.
     // This object is a compiler runtime payload, like the float/deep-copy
     // runtimes, and is removed after linking instead of creating another cache.
-    const startup_path = if (target.eql(.windows_arm64))
+    const startup_path = if (target.eql(.windows_arm64) and !WindowsStartup.requiresRuntime(libraries.items))
         try std.fmt.allocPrint(allocator, "{s}.startup.obj", .{object_path})
     else
         null;
@@ -111,7 +111,9 @@ pub fn executable(
         .exited => |code| if (code == 0) return,
         else => {},
     }
+    if (result.stdout.len != 0) std.debug.print("{s}", .{result.stdout});
     if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
+    std.debug.print("silex: native linker for {s} terminated with {any}\n", .{ target.name(), result.term });
     return error.LinkFailed;
 }
 

@@ -158,3 +158,13 @@ user drop hooks. An uncached path remains available to internal tests, which
 compare complete IR text and serialization, inherited destruction order and
 successive analyses. This table is compiler-local, not a persistent package
 artifact, and applies equally to the shared frontend of both backends.
+
+## Nested consumer source discovery
+
+A consumer may live under its dependency directory. Source discovery normalizes
+exclusion paths once per source root and excludes only descendant dependency
+directories. An ancestor dependency must not erase the consumer sources. The
+compiler and editor share this rule, independently of absolute/relative entry
+spelling. The CLI regression `verify-consumer-module-paths.py` exercises a sibling
+function import from a consumer nested below its dependency on the native ARM64
+Linux and Windows jobs; module tests also preserve descendant exclusions.

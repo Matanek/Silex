@@ -41,6 +41,12 @@ export fn silex_boundary_answer() callconv(.c) i32 {
         const expected = [_]u16{ 'm', 'o', 't', 'e', 'u', 'r', '-', 'é', 't', 'é', 0 };
         for (expected, 0..) |character, index| if (argument[index] != character) return -4;
     }
+    return silex_boundary_initialized();
+}
+
+// The standard CRT initializes its selected argv width. Probe its constructor
+// and TLS contract independently of the standalone startup's dual-argv setup.
+export fn silex_boundary_initialized() callconv(.c) i32 {
     const value: *volatile i32 = &thread_value;
     if (value.* != 21) return -5;
     value.* = 99;

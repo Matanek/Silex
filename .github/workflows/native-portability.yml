@@ -727,6 +727,7 @@ jobs:
         run: |
           zig build test-debug-copies --build-file Toolchain/build.zig
           python3 .github/scripts/verify-native-scalar-cache.py linux-arm64 Toolchain/.zig-cache/native-scalar-cache
+          SILEX_DATA_ROOT="$RUNNER_TEMP/home/.silex" python3 .github/scripts/verify-consumer-module-paths.py "$RUNNER_TEMP/silex-prefix/bin/silex"
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -1330,6 +1331,11 @@ jobs:
           }
           python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows --cold-link-cache
           python Toolchain/Tools/VerifyWindowsStartup.py $silex $boundaryArchive
+          if ($LASTEXITCODE -ne 0) { throw "standalone UCRT startup regression" }
+          python Toolchain/Tools/VerifyWindowsStartup.py $silex $boundaryArchive --cpp-runtime
+          if ($LASTEXITCODE -ne 0) { throw "C++ runtime startup regression" }
+          python .github/scripts/verify-consumer-module-paths.py $silex
+          if ($LASTEXITCODE -ne 0) { throw "nested consumer module discovery regression" }
           $shaderMachine = Get-PeMachine $shadercross
           if ($shaderMachine -ne 0x8664) {
             throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"

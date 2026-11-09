@@ -14,6 +14,13 @@ func add_two(value:int32) int32 { return value + 2 }
 
 public func answer() int32 { return native_answer() }
 
+let native_initialized = C.function<func() int32>(
+    library:Boundary.Native,
+    name:"silex_boundary_initialized"
+)
+
+public func initialized_answer() int32 { return native_initialized() }
+
 public func callback_answer() int32 {
     return native_apply(40, C.function_address(add_two))
 }

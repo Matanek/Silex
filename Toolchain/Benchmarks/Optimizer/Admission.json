@@ -15,6 +15,7 @@
     {"id": "native-benchmark-campaign", "prefixes": ["Toolchain/Benchmarks/Native/", "Toolchain/Tools/QualifyHeap.mjs"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "optimizer-robustness-qualified", "native-portability-matrix", "external-qualification-selected"], "implementation_change": false},
     {"id": "lsp-benchmarks-and-audits", "prefixes": ["Toolchain/Benchmarks/LspCompletion/", "Toolchain/Tools/LspCompletionAudit/", "Toolchain/Tools/LspCompletionBenchmark/"], "required_checks": ["optimizer-admission-quick"], "implementation_change": false},
     {"id": "toolchain-build-and-manifest", "prefixes": ["Toolchain/build.zig", "Toolchain/build.zig.zon"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "native-portability-matrix"], "implementation_change": true},
+    {"id": "native-cache-and-startup-verifiers", "prefixes": ["Toolchain/Tools/VerifyCacheProcess.py", "Toolchain/Tools/VerifyCacheRetention.py", "Toolchain/Tools/VerifyWindowsStartup.py"], "required_checks": ["optimizer-admission-quick", "native-portability-matrix"], "implementation_change": false},
     {"id": "optimizer-documentation", "prefixes": ["Docs/"], "required_checks": ["optimizer-admission-quick"], "implementation_change": false},
     {"id": "admission-workflows", "prefixes": [".github/workflows/"], "required_checks": ["optimizer-admission-quick", "native-portability-matrix"], "implementation_change": false}
   ]

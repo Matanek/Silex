@@ -3,7 +3,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub const Error = Allocator.Error || Io.Dir.OpenError || Io.Dir.Iterator.Error || error{
+pub const Error = Allocator.Error || Io.Dir.OpenError || Io.Dir.Iterator.Error || std.process.CurrentPathAllocError || error{
     DuplicateModule,
     InvalidModulePath,
 };
@@ -147,6 +147,7 @@ fn discoverSources(
 ) Error!Index {
     var root = try Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true });
     defer root.close(io);
+    const nested_exclusions = try nestedExclusions(allocator, io, root_path, excluded_roots);
 
     var providers: std.ArrayList(Provider) = .empty;
     var walker = try root.walk(allocator);
@@ -164,7 +165,7 @@ fn discoverSources(
             relative_path
         else
             try std.fs.path.join(allocator, &.{ root_path, relative_path });
-        if (insideAny(full_path, excluded_roots)) continue;
+        if (insideAny(full_path, nested_exclusions)) continue;
 
         const module_name = sourceModuleName(allocator, relative_path, prefix) catch |err| switch (err) {
             error.InvalidModulePath => if (recover_invalid_paths) continue else return err,
@@ -200,6 +201,27 @@ fn discoverSources(
         }
     }
     return .{ .providers = try providers.toOwnedSlice(allocator) };
+}
+
+// A consumer can live below its dependency's directory. Excluding that ancestor
+// would erase the consumer itself. Compare normalized relative paths once per
+// root, then retain only dependency directories nested inside the searched root.
+fn nestedExclusions(allocator: Allocator, io: Io, root_path: []const u8, roots: []const []const u8) Error![]const []const u8 {
+    if (roots.len == 0) return &.{};
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    var nested: std.ArrayList([]const u8) = .empty;
+    for (roots) |excluded| {
+        const relative = try std.fs.path.relative(allocator, cwd, null, root_path, excluded);
+        if (relative.len == 0 or std.fs.path.isAbsolute(relative)) continue;
+        if (std.mem.eql(u8, relative, "..") or
+            (relative.len > 2 and std.mem.startsWith(u8, relative, "..") and relative[2] == std.fs.path.sep)) continue;
+        const path = if (root_path.len == 0 or std.mem.eql(u8, root_path, "."))
+            relative
+        else
+            try std.fs.path.join(allocator, &.{ root_path, relative });
+        try nested.append(allocator, path);
+    }
+    return nested.toOwnedSlice(allocator);
 }
 
 fn insideAny(path: []const u8, roots: []const []const u8) bool {
@@ -554,4 +576,35 @@ test "preserve merge ownership when appending an entry provider" {
         .owner = 3,
     }} };
     try std.testing.expectError(error.DuplicateModule, combine(allocator, &.{ merged, duplicate }));
+}
+
+test "nested consumer discovery excludes only descendant dependency roots for either path spelling" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Library/Tests/Consumer/Sources/Nested");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Library/Tests/Consumer/Sources/Main.sx", .data = "" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Library/Tests/Consumer/Sources/Helper.sx", .data = "" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Library/Tests/Consumer/Sources/Nested/Private.sx", .data = "" });
+    const cwd = try std.process.currentPathAlloc(std.testing.io, allocator);
+    const library = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Library" });
+    const sources = try std.fs.path.join(allocator, &.{ library, "Tests", "Consumer", "Sources" });
+    const nested = try std.fs.path.join(allocator, &.{ sources, "Nested" });
+    for ([_]bool{ false, true }) |absolute_source| {
+        const source_root = if (absolute_source) try std.fs.path.resolve(allocator, &.{ cwd, sources }) else sources;
+        for ([_]bool{ false, true }) |absolute_exclusions| {
+            const ancestor = if (absolute_exclusions) try std.fs.path.resolve(allocator, &.{ cwd, library }) else library;
+            const child = if (absolute_exclusions) try std.fs.path.resolve(allocator, &.{ cwd, nested }) else nested;
+            const exclusions = &.{ ancestor, child };
+            const index = try discoverOwnedExcludingAs(allocator, std.testing.io, source_root, null, 0, exclusions, .portable);
+            try std.testing.expectEqual(@as(usize, 2), index.providers.len);
+            try std.testing.expect(index.find("Main") != null);
+            try std.testing.expect(index.find("Helper") != null);
+            try std.testing.expect(index.find("Nested.Private") == null);
+            const editor = try discoverForEditor(allocator, std.testing.io, source_root, null, 0, exclusions, .portable);
+            try std.testing.expectEqual(@as(usize, 2), editor.providers.len);
+        }
+    }
 }

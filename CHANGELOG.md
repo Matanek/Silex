@@ -18,6 +18,9 @@ features and versions; these are not included in the compiler binary.
 
 ### Changes
 
+- Consumers located under their dependency directory retain sibling modules with absolute or relative entry paths. Compiler and editor discovery exclude only descendant dependency roots, without hiding a consumer below an ancestor dependency.
+- On Windows ARM64, dependencies declaring the C++ runtime retain its full CRT startup; linking no longer combines it with the standalone UCRT startup and TLS symbols.
+- Native link failures also report the process termination status and standard output, distinguishing symbol errors from a linker crash.
 - Correct ARM64 stack-slot reuse after floating-point writes: stale integer bits no longer hide the current result. Constants, unary operations and arithmetic are covered in Debug and Release on ARM64 targets; the X64 backend does not share this cache.
 
 - Native Windows ARM64 linking uses UCRT directly and a small startup embedded
