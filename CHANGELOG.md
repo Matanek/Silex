@@ -16,9 +16,9 @@ This editorial history starts with version 0.44.1.
   one program. Each new analysis resets the lookup; inherited finalizers and
   construction cleanup remain identical.
 
-- Specialization filters incompatible anonymous declarations by position and
-  arity before comparing names. Lexical callback selection and capture context
-  remain identical, with fewer comparisons during compilation.
+- Specialization indexes lexical callbacks by file, position and arity before
+  comparing names. It avoids repeatedly scanning incompatible declarations
+  while preserving callback selection and capture context.
 
 - Native copy forwarding avoids definition queries for entries that already
   point to their own storage. Other alias invalidations and the emitted

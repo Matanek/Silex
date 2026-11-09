@@ -127,6 +127,16 @@ while selecting the same body. This count describes the mechanism, not a
 portable end-to-end timing guarantee. Both compilation backends use the shared
 specializer; native ABI, emitted instructions and public syntax are unchanged.
 
+The specializer builds a local index of anonymous declarations keyed by source
+file (including `null`), byte offset and generic arity after protocol-default
+expansion. Input function declarations stay fixed during specialization;
+generated functions use a separate list. Each bucket preserves source order.
+The selector still compares the same names and passes the same lexical context
+to instantiation, but no longer scans unrelated declarations per identifier.
+A new `specialize` rebuilds the index and releases the previous lookup storage.
+Tests compare indexed selection to both linear paths and distinguish an absent
+file from file zero. The 1,024-declaration fixture selects two ordered candidates.
+
 ## Per-analysis class destruction plans
 
 `Resources.classDropPlans` shares immutable finalizer lists for the same optional

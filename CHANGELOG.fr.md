@@ -16,10 +16,10 @@ Cet historique éditorial commence à la version 0.44.1.
   d’un même programme. Leur remise à zéro accompagne chaque nouvelle analyse ;
   les finaliseurs hérités et le nettoyage des constructions restent identiques.
 
-- La spécialisation écarte les déclarations anonymes incompatibles par position
-  et arité avant de comparer leurs noms. La sélection des callbacks lexicaux
-  et leur contexte de capture restent identiques, avec moins de comparaisons
-  pendant la compilation.
+- La spécialisation indexe les callbacks lexicaux par fichier, position et
+  arité avant de comparer leurs noms. Elle évite les parcours répétés des
+  déclarations incompatibles ; la sélection et le contexte de capture restent
+  identiques.
 
 - Le transfert des copies natives évite de rechercher les définitions pour les
   entrées qui pointent déjà sur leur propre stockage. Les invalidations des

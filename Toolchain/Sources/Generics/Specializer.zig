@@ -73,6 +73,7 @@ const MethodSpecialization = struct {
 pub const Specializer = struct {
     allocator: Allocator,
     source: Ast.Program = undefined,
+    lexical_callbacks: LexicalCallbacks.Index = .{},
     functions: std.ArrayList(Ast.Function) = .empty,
     structures: std.ArrayList(Ast.Structure) = .empty,
     enums: std.ArrayList(Ast.Enum) = .empty,
@@ -99,6 +100,8 @@ pub const Specializer = struct {
             return err;
         };
         self.source = program;
+        self.lexical_callbacks.deinit(self.allocator);
+        self.lexical_callbacks = try LexicalCallbacks.Index.build(self.allocator, program.functions);
         self.diagnostic = null;
         var found_main = false;
         for (program.functions) |function| {

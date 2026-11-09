@@ -1,6 +1,39 @@
+const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Source = @import("../Source.zig");
-const std = @import("std");
+
+const Key = struct { file: ?usize, offset: usize, arity: usize };
+pub const Index = struct {
+    buckets: std.AutoHashMapUnmanaged(Key, std.ArrayList(usize)) = .empty,
+
+    pub fn build(allocator: std.mem.Allocator, functions: anytype) !Index {
+        var index: Index = .{};
+        errdefer index.deinit(allocator);
+        for (functions, 0..) |function, ordinal| {
+            if (!function.is_anonymous) continue;
+            const entry = try index.buckets.getOrPut(allocator, .{
+                .file = function.position.file,
+                .offset = function.position.offset,
+                .arity = function.type_parameters.len,
+            });
+            if (!entry.found_existing) entry.value_ptr.* = .empty;
+            try entry.value_ptr.append(allocator, ordinal);
+        }
+        return index;
+    }
+
+    pub fn deinit(self: *Index, allocator: std.mem.Allocator) void {
+        var values = self.buckets.valueIterator();
+        while (values.next()) |value| value.deinit(allocator);
+        self.buckets.deinit(allocator);
+        self.* = .{};
+    }
+
+    fn candidates(self: Index, position: Source.Position, arity: usize) []const usize {
+        const bucket = self.buckets.get(.{ .file = position.file, .offset = position.offset, .arity = arity }) orelse return &.{};
+        return bucket.items;
+    }
+};
 
 // Anonymous bodies are lifted by the parser, but their generic calls must be
 // specialized where the callback is defined, with the lexical binding types.
@@ -13,7 +46,17 @@ pub fn specialize(
     position: Source.Position,
     locals: anytype,
 ) (Source.Error || std.mem.Allocator.Error)!?[]const u8 {
-    return specializeConfigured(self, name, arguments, position, locals, true, null);
+    for (self.lexical_callbacks.candidates(position, arguments.len)) |ordinal| {
+        const function = self.source.functions[ordinal];
+        if (!nameMatches(function.name, name)) continue;
+        return try self.instantiate(function, arguments, position, locals);
+    }
+    return null;
+}
+
+fn nameMatches(candidate: []const u8, name: []const u8) bool {
+    return std.mem.eql(u8, candidate, name) or
+        (candidate.len > name.len and std.mem.endsWith(u8, candidate, name) and candidate[candidate.len - name.len - 1] == '.');
 }
 
 const Counters = struct { name_checks: usize = 0 };
@@ -25,9 +68,7 @@ fn specializeConfigured(self: anytype, name: []const u8, arguments: []const Ast.
             function.type_parameters.len == arguments.len;
         if (filter_first and !eligible) continue;
         if (counters) |c| c.name_checks += 1;
-        const matches = std.mem.eql(u8, function.name, name) or
-            (function.name.len > name.len and std.mem.endsWith(u8, function.name, name) and
-                function.name[function.name.len - name.len - 1] == '.');
+        const matches = nameMatches(function.name, name);
         if (!eligible or !matches) continue;
         return try self.instantiate(function, arguments, position, locals);
     }
@@ -42,6 +83,7 @@ const Candidate = struct {
 };
 const Probe = struct {
     source: struct { functions: []const Candidate },
+    lexical_callbacks: Index = .{},
     calls: usize = 0,
     arguments: []const Ast.Type = &.{},
     locals: usize = 0,
@@ -64,10 +106,16 @@ test "lexical callback filtering keeps selection and capture context while skipp
     candidates[1023] = .{ .name = "Module.nested.callback", .is_anonymous = true, .position = position, .type_parameters = &.{0} };
     var old: Probe = .{ .source = .{ .functions = &candidates } };
     var new: Probe = old;
+    new.lexical_callbacks = try Index.build(std.testing.allocator, &candidates);
+    defer new.lexical_callbacks.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(usize, &.{ 1022, 1023 }, new.lexical_callbacks.candidates(position, 1));
+    var filtered: Probe = old;
     var before: Counters = .{};
     var after: Counters = .{};
     const expected = try specializeConfigured(&old, "callback", &.{.int}, position, @as([]const bool, &.{ true, false }), false, &before);
-    const actual = try specializeConfigured(&new, "callback", &.{.int}, position, @as([]const bool, &.{ true, false }), true, &after);
+    const filtered_result = try specializeConfigured(&filtered, "callback", &.{.int}, position, @as([]const bool, &.{ true, false }), true, &after);
+    const actual = try specialize(&new, "callback", &.{.int}, position, @as([]const bool, &.{ true, false }));
+    try std.testing.expectEqualStrings(filtered_result.?, actual.?);
     try std.testing.expectEqualStrings(expected.?, actual.?);
     try std.testing.expectEqualStrings("Module.nested.callback", actual.?);
     try std.testing.expectEqual(@as(usize, 1), new.calls);
@@ -80,6 +128,7 @@ test "lexical callback filters retain position arity and exact suffix boundaries
     const position: Source.Position = .{ .offset = 4, .line = 1, .column = 5 };
     const candidates = [_]Candidate{
         .{ .name = "notcallback", .is_anonymous = true, .position = position },
+        .{ .name = "callback", .is_anonymous = true, .position = .{ .offset = 4, .line = 1, .column = 5, .file = 0 } },
         .{ .name = "Root.callback", .is_anonymous = true, .position = .{ .offset = 5, .line = 1, .column = 6 } },
         .{ .name = "Root.callback", .is_anonymous = true, .position = position },
         .{ .name = "callback", .is_anonymous = true, .position = position },
@@ -87,8 +136,10 @@ test "lexical callback filters retain position arity and exact suffix boundaries
     for ([_][]const Ast.Type{ &.{}, &.{.float32} }) |args| {
         var old: Probe = .{ .source = .{ .functions = &candidates } };
         var new: Probe = old;
+        new.lexical_callbacks = try Index.build(std.testing.allocator, &candidates);
+        defer new.lexical_callbacks.deinit(std.testing.allocator);
         const expected = try specializeConfigured(&old, "callback", args, position, @as([]const bool, &.{}), false, null);
-        const actual = try specializeConfigured(&new, "callback", args, position, @as([]const bool, &.{}), true, null);
+        const actual = try specialize(&new, "callback", args, position, @as([]const bool, &.{}));
         if (expected) |name| try std.testing.expectEqualStrings(name, actual.?) else try std.testing.expect(actual == null);
         try std.testing.expectEqual(old.calls, new.calls);
     }
