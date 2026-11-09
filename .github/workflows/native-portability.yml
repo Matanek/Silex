@@ -1282,9 +1282,15 @@ jobs:
             if (-not $process.Start()) {
               throw "failed to start native command: $Path"
             }
-            $stdout = $process.StandardOutput.ReadToEnd()
-            $stderr = $process.StandardError.ReadToEnd()
-            $process.WaitForExit()
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(20000)) {
+              $process.Kill($true)
+              $process.WaitForExit()
+              throw "native command exceeded 20 seconds: $Path"
+            }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
             if ($process.ExitCode -ne 0) {
               throw "native command failed with exit code $($process.ExitCode): $Path`n$stderr"
             }
@@ -1350,8 +1356,13 @@ jobs:
           if ($shaderMachine -ne 0x8664) {
             throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"
           }
-          & $managedZig version
-          & $shadercross --help | Select-Object -First 1
+          $python = (Get-Command python).Source
+          $watcher = Join-Path $env:GITHUB_WORKSPACE ".github/scripts/watch-native-command.py"
+          $diagnostics = Join-Path $env:RUNNER_TEMP "native-portability-diagnostics"
+          & $python $watcher --label "managed Zig version" --timeout 30 `
+            --output "$diagnostics/zig-version" --powershell "$PSHOME/pwsh.exe" -- $managedZig version
+          & $python $watcher --label "Shadercross help" --timeout 30 `
+            --output "$diagnostics/shadercross-help" --powershell "$PSHOME/pwsh.exe" -- $shadercross --help
 
           $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
 
@@ -1359,20 +1370,42 @@ jobs:
           # Preserve and inspect independently linked tests if native execution
           # fails before PowerShell can report the full NTSTATUS.
           $PSNativeCommandUseErrorActionPreference = $false
-          & $silex test --backend native $portabilitySource --nocache
+          & $python $watcher --label "native portability tests" --timeout 600 `
+            --output "$diagnostics/native-tests" --powershell "$PSHOME/pwsh.exe" `
+            --artifact-glob ".silex/test/NativePortability-*" -- `
+            $silex test --backend native $portabilitySource --nocache
           $testExitCode = $LASTEXITCODE
           if ($testExitCode -ne 0) {
+            # Keep the original failure while checking the reduced wide-float
+            # consumer through normal Debug/Release compilation and execution.
+            $floatSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/FloatCollectionArguments.sx"
+            foreach ($mode in @("debug", "release")) {
+              $floatExecutable = Join-Path $env:RUNNER_TEMP "float-collection-$mode.exe"
+              & $python $watcher --label "float collection compile $mode" --timeout 120 `
+                --output "$diagnostics/float-compile-$mode" --powershell "$PSHOME/pwsh.exe" `
+                --artifact-glob "$floatExecutable*" -- `
+                $silex compile $floatSource "--$mode" --nocache -o $floatExecutable
+              if ($LASTEXITCODE -eq 0) {
+                & $python $watcher --label "float collection run $mode" --timeout 20 `
+                  --output "$diagnostics/float-run-$mode" --powershell "$PSHOME/pwsh.exe" -- $floatExecutable
+              }
+            }
+            if ($testExitCode -eq 124) {
+              throw "Windows ARM64 native tests timed out; process state and artifacts are retained"
+            }
             $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
             $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |
               Select-Object -First 1
             $failedTests = @(Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE ".silex/test") `
-              -Filter "NativePortability-*.exe" -File)
+              -Filter "NativePortability-*.exe" -File | Select-Object -First 3)
             if ($null -ne $cdb) {
               foreach ($failedTest in $failedTests) {
                 Assert-Arm64Pe $failedTest.FullName
                 Write-Output "debugging retained ARM64 test $($failedTest.Name) with $($cdb.FullName)"
-                & $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $failedTest.FullName
+                & $python $watcher --label "retained ARM64 test debugger" --timeout 60 `
+                  --output "$diagnostics/debugger-$($failedTest.BaseName)" --powershell "$PSHOME/pwsh.exe" -- `
+                  $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $failedTest.FullName
               }
             }
             throw "Windows ARM64 native test slice failed with exit code $testExitCode"
@@ -1553,6 +1586,15 @@ jobs:
               throw "module callbacks regression: $mode"
             }
           }
+
+      - name: Preserve Windows ARM64 command diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-native-diagnostics-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-portability-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify signed C storage in native Debug and Release
         shell: bash
