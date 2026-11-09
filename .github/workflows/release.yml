@@ -397,7 +397,10 @@ jobs:
     needs:
       - preflight
       - release-set
-    if: inputs.publish == true && needs.preflight.result == 'success' && needs.release-set.result == 'success'
+    # Reused targets are skipped ancestors; do not inherit implicit success().
+    if: >-
+      always() && !cancelled() && inputs.publish == true &&
+      needs.preflight.result == 'success' && needs.release-set.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
@@ -438,7 +441,7 @@ jobs:
 
   website:
     needs: publish
-    if: inputs.publish
+    if: always() && !cancelled() && inputs.publish == true && needs.publish.result == 'success'
     uses: ./.github/workflows/website-refresh.yml
     with:
       version: ${{ inputs.version }}

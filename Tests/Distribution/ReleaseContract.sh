@@ -111,6 +111,20 @@ if '--notes-file "$RUNNER_TEMP/release-notes.md"' not in workflow or "--generate
 if "uses: ./.github/workflows/website-refresh.yml" not in workflow or "::warning::" in workflow:
     raise SystemExit("Website refresh must be a required, independently retryable release job")
 
+# Partial reuse intentionally skips target jobs. A downstream implicit success()
+# also sees those ancestors, even after release-set has verified all artifacts.
+for job, required_successes in (("publish", ("preflight", "release-set")), ("website", ("publish",))):
+    block = re.search(rf"^  {job}:\n(.*?)(?=^  [a-z]|\Z)", workflow, re.MULTILINE | re.DOTALL)
+    condition = re.search(r"^    if: (.*(?:\n      .*)*)", block.group(1), re.MULTILINE) if block else None
+    expression = condition.group(1) if condition else ""
+    if not re.search(r"\b(always|cancelled)\(\)", expression):
+        raise SystemExit(f"{job} must explicitly handle skipped ancestors during partial reuse")
+    if "inputs.publish == true" not in expression:
+        raise SystemExit(f"{job} must require explicit publication intent")
+    for dependency in required_successes:
+        if f"needs.{dependency}.result == 'success'" not in expression:
+            raise SystemExit(f"{job} must require successful {dependency}")
+
 llvm_contract = (
     "llvm-21.1.8-silex.1",
     "LLVM-21.1.8-macos-arm64.tar.gz",
