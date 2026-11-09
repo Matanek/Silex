@@ -1520,6 +1520,8 @@ jobs:
 
       - name: Verify signed C storage in native Debug and Release
         shell: bash
+        env:
+          SILEX_DATA_ROOT: ${{ runner.temp }}/home/.silex
         run: |
           sh .github/scripts/smoke-native-memory.sh \
             "$RUNNER_TEMP/silex-install/bin/silex.exe" \
