@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le transfert des copies natives évite de rechercher les définitions pour les
+  entrées qui pointent déjà sur leur propre stockage. Les invalidations des
+  autres alias et les instructions produites restent identiques en Debug et
+  Release sur les chemins ARM64 et X64 partagés.
+
 - Une preuve de confinement des callbacks suit les valeurs, champs, alias et
   appels dans un graphe fini avant l’interprétation complète de la propriété.
   Les cas non prouvés conservent cette interprétation, notamment les factories

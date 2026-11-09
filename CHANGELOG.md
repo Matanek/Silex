@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native copy forwarding avoids definition queries for entries that already
+  point to their own storage. Other alias invalidations and the emitted
+  instructions remain identical in Debug and Release on the shared ARM64
+  and X64 paths.
+
 - Callback confinement follows values, fields, aliases and calls in a finite
   flow graph before the complete ownership interpretation. Unproven cases
   retain that interpretation, including opaque factories and retaining paths.

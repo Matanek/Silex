@@ -27,6 +27,22 @@ fixture `Tests/Native/DebugCopies.sx` also covers reference writes, collection
 replacement and branch/loop snapshots. `NativePortability.sx` invokes it from
 both the test corpus and its distribution entry point.
 
+## Compilation work
+
+Forwarding omits definition queries for an alias entry that already points to
+its own storage. Invalidating that entry would assign the same slot back to
+itself. Non-identity snapshots still test both their destination and their
+storage source, so source writes, range writes and block boundaries preserve
+the previous invalidation rules.
+
+The sparse-alias regression compares the complete machine function with the
+previous algorithm, including writes, overlapping ranges and a join. Its
+2,048-slot fixture reduces definition queries by more than a factor of 100
+without changing the serialized instructions. This is a work-count proof,
+not an end-to-end timing claim. The exclusion applies to the shared Debug and
+Release pass for all six native targets; LLVM does not use this pass. It changes
+neither emitted operations nor architecture/OS adapters.
+
 ## Local qualification
 
 Measured on macOS 26.6.2, ARM64, on 31 October 2026. The workload is

@@ -5,6 +5,17 @@ const Liveness = @import("ResidenceLiveness.zig");
 // This late pass never extends a register lifetime. Only unaddressed stack
 // homes can alias, within one basic block, until either home is overwritten.
 pub fn optimize(allocator: std.mem.Allocator, function: Machine.Function) !Machine.Function {
+    return optimizeConfigured(allocator, function, true, null);
+}
+
+const Counters = struct { definition_queries: usize = 0 };
+
+fn defines(counters: ?*Counters, instruction: Machine.Instruction, slot: usize) bool {
+    if (counters) |c| c.definition_queries += 1;
+    return Liveness.instructionDefines(instruction, slot);
+}
+
+fn optimizeConfigured(allocator: std.mem.Allocator, function: Machine.Function, skip_identities: bool, counters: ?*Counters) !Machine.Function {
     if (function.reuses_slots) return function;
     const aliases = try allocator.alloc(Machine.Slot, function.slot_count);
     defer allocator.free(aliases);
@@ -52,8 +63,11 @@ pub fn optimize(allocator: std.mem.Allocator, function: Machine.Function) !Machi
         // Entries point directly at their storage source. A source write
         // invalidates every snapshot, while a destination write kills itself.
         for (aliases, 0..) |*source, slot| {
-            if (Liveness.instructionDefines(instruction.*, slot) or
-                Liveness.instructionDefines(instruction.*, source.*)) source.* = @intCast(slot);
+            // Resetting an identity cannot change it. Dependent snapshots
+            // still test both their destination and their storage source.
+            if (skip_identities and source.* == slot) continue;
+            if (defines(counters, instruction.*, slot) or
+                defines(counters, instruction.*, source.*)) source.* = @intCast(slot);
         }
         switch (instruction.*) {
             .copy => |v| if (eligible[v.result] and eligible[v.operand]) {
@@ -155,4 +169,44 @@ test "stack forwarding excludes addressed and register homes and handles aggrega
     try std.testing.expectEqual(@as(Machine.Slot, 0), after.instructions[1].binary.left);
     try std.testing.expectEqual(@as(Machine.Slot, 4), after.instructions[1].binary.right);
     try std.testing.expectEqual(@as(Machine.Slot, 5), after.instructions[2].binary.left);
+}
+
+test "stack forwarding identity pruning preserves source writes ranges and block joins" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const original: Machine.Function = .{
+        .name = "sparse aliases",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 2048,
+        .frame_size = try Machine.frameSize(2048),
+        .instructions = &.{
+            .{ .copy = .{ .result = 2, .operand = 0 } },
+            .{ .copy = .{ .result = 3, .operand = 2 } },
+            .{ .binary = .{ .result = 4, .left = 3, .right = 1, .operator = .add } },
+            .{ .constant_int = .{ .result = 0, .bits = 9 } },
+            .{ .binary = .{ .result = 5, .left = 3, .right = 0, .operator = .add } },
+            .{ .copy_range = .{ .result = .{ .start = 6, .width = 3 }, .operand = .{ .start = 3, .width = 3 } } },
+            .{ .copy_range = .{ .result = .{ .start = 4, .width = 3 }, .operand = .{ .start = 3, .width = 3 } } },
+            .{ .binary = .{ .result = 9, .left = 7, .right = 8, .operator = .add } },
+            .{ .local_address = .{ .result = 10, .local = 1, .width = 1 } },
+            .{ .copy = .{ .result = 11, .operand = 9 } },
+            .{ .jump = 11 },
+            .{ .binary = .{ .result = 12, .left = 11, .right = 2, .operator = .add } },
+            .{ .return_value = .{ .start = 12, .width = 1 } },
+        },
+    };
+    var before: Counters = .{};
+    var after: Counters = .{};
+    const expected = try optimizeConfigured(a, original, false, &before);
+    const actual = try optimizeConfigured(a, original, true, &after);
+    const expected_json = try std.json.Stringify.valueAlloc(a, expected, .{});
+    const actual_json = try std.json.Stringify.valueAlloc(a, actual, .{});
+    try std.testing.expectEqualStrings(expected_json, actual_json);
+    try std.testing.expect(after.definition_queries * 100 < before.definition_queries);
+    try std.testing.expectEqual(@as(Machine.Slot, 3), actual.instructions[4].binary.left);
+    try std.testing.expectEqual(@as(Machine.Slot, 11), actual.instructions[11].binary.left);
 }
