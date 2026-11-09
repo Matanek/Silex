@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le banc de compilation conserve les sorties partielles et les fichiers de
+  phase en cas d’attente, puis arrête ses processus enfants sur expiration.
+  Le diagnostic initial Windows ARM64 distingue cette observation des budgets
+  de latence et conserve les gardes de réutilisation et de rétention.
+
 - Les gardes de compilation locale couvrent les alias actifs, la réutilisation
   native Debug/Release et la rétention dans les validations natives multi-cibles.
 

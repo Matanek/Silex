@@ -11,7 +11,10 @@ def main():
     parser.add_argument("compiler", type=Path)
     parser.add_argument("--zig", default="zig")
     parser.add_argument("--target", help="Explicit Zig target when the bootstrap tool is emulated")
+    parser.add_argument("--initial-compile-timeout", type=float, default=60)
     args = parser.parse_args()
+    if args.initial_compile_timeout <= 0:
+        parser.error("--initial-compile-timeout must be positive")
     checkout = Path(__file__).resolve().parents[2]
     compiler = args.compiler.resolve(strict=True)
     command = [args.zig, "build", "test-fast-local-compilation",
@@ -20,8 +23,11 @@ def main():
         command.append("-Dtarget=" + args.target)
     subprocess.run(command, cwd=checkout / "Toolchain", check=True)
     # Every source-compiling CLI invocation shares the workspace above the repo.
+    subprocess.run([sys.executable, str(checkout / "Toolchain/Tools/VerifyCacheProcess.py")],
+                   cwd=checkout.parent, check=True)
     subprocess.run([sys.executable, str(checkout / "Toolchain/Tools/VerifyCacheRetention.py"),
-                    str(compiler)], cwd=checkout.parent, check=True)
+                    str(compiler), "--initial-compile-timeout", str(args.initial_compile_timeout)],
+                   cwd=checkout.parent, check=True)
 
 
 if __name__ == "__main__":

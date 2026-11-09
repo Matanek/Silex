@@ -8,14 +8,71 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import uuid
 
 
 RESERVE = 320 * 1024 * 1024
 ROOTS = ("cache/v4", "cache/shaders", "artifacts/v1", "run", "test", "llvm")
+
+
+def run_compiler(arguments, env, timeout=60):
+    """Keep phase evidence and stop this compiler's descendants on timeout."""
+    trace = Path(env["SILEX_COMPILATION_TRACE"])
+    trace.unlink(missing_ok=True)
+    watched = [trace]
+    if "-o" in arguments:
+        output = Path(arguments[arguments.index("-o") + 1])
+        watched += [output, Path(str(output) + ".silex.o")]
+    started = time.monotonic()
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(arguments, env=env, stdout=stdout, stderr=stderr,
+                                   start_new_session=os.name != "nt")
+        expired = False
+        try:
+            while True:
+                remaining = timeout - (time.monotonic() - started)
+                try:
+                    process.wait(timeout=max(0, min(15, remaining)))
+                    break
+                except subprocess.TimeoutExpired:
+                    sizes = {}
+                    for path in watched:
+                        try:
+                            sizes[str(path)] = path.stat().st_size
+                        except OSError:
+                            sizes[str(path)] = None
+                    print(json.dumps({"compiler_pending_seconds": round(time.monotonic() - started, 3),
+                                      "file_bytes": sizes}), flush=True)
+                    if time.monotonic() - started >= timeout:
+                        expired = True
+                        break
+        finally:
+            if process.poll() is None:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+                else:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+        stdout.seek(0)
+        stderr.seek(0)
+        out, err = (stream.read().decode("utf-8", errors="replace").replace("\r\n", "\n")
+                    for stream in (stdout, stderr))
+    if expired:
+        print(json.dumps({"compiler_timeout_seconds": timeout, "stdout_tail": out[-8192:],
+                          "stderr_tail": err[-8192:]}), flush=True)
+        raise subprocess.TimeoutExpired(arguments, timeout, output=out, stderr=err)
+    return subprocess.CompletedProcess(arguments, process.returncode, out, err)
 
 
 def retained_bytes(cache):
@@ -24,7 +81,7 @@ def retained_bytes(cache):
                if path.is_file() and not path.is_symlink())
 
 
-def verify_reuse(compiler, mode):
+def verify_reuse(compiler, mode, initial_timeout=60):
     """Same-basename consumers must retain hits and invalidate edited imports."""
     with tempfile.TemporaryDirectory(prefix="silex-native-reuse-") as directory:
         root = Path(directory)
@@ -42,11 +99,17 @@ def verify_reuse(compiler, mode):
         def compile_case(index, value, expected):
             project = projects[index]
             output = project / ("program.exe" if os.name == "nt" else "program")
-            result = subprocess.run([str(compiler), "compile", str(project / "Main.sx"),
-                                     "--backend", "native", "--" + mode, "-o", str(output)],
-                                    env=env, capture_output=True, text=True, timeout=60)
+            initial = not digests
+            started = time.monotonic()
+            result = run_compiler([str(compiler), "compile", str(project / "Main.sx"),
+                                   "--backend", "native", "--" + mode, "-o", str(output)],
+                                  env, timeout=initial_timeout if initial else 60)
             assert result.returncode == 0 and not result.stdout and not result.stderr, result
             report = json.loads(trace.read_text())
+            if initial:
+                print(json.dumps({"first_native_compile": mode,
+                                  "wall_seconds": round(time.monotonic() - started, 6),
+                                  "phases": report["phases"]}), flush=True)
             assert report["cache_result"] == expected, report
             digest = hashlib.sha256(output.read_bytes()).digest()
             if expected == "hit_before_frontend":
@@ -87,8 +150,7 @@ def verify_publication(compiler, command, fail=False):
             text = letter * (768 * 1024)
             failure = '; panic("retention probe failure")' if fail else ""
             source.write_text('func main() { print("' + text + '")' + failure + ' }\n')
-            result = subprocess.run(arguments, env=env, capture_output=True,
-                                    text=True, timeout=60)
+            result = run_compiler(arguments, env)
             if fail:
                 assert result.returncode == 1, result
                 assert result.stderr.endswith("runtime error: retention probe failure\n"), result.stderr
@@ -137,9 +199,13 @@ def verify_publication(compiler, command, fail=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("compiler", type=Path)
+    parser.add_argument("--initial-compile-timeout", type=float, default=60,
+                        help="Diagnostic bound for the first Debug compile; other cases keep 60 seconds")
     args = parser.parse_args()
+    if args.initial_compile_timeout <= 0:
+        parser.error("--initial-compile-timeout must be positive")
     compiler = args.compiler.resolve(strict=True)
-    verify_reuse(compiler, "debug")
+    verify_reuse(compiler, "debug", args.initial_compile_timeout)
     verify_reuse(compiler, "release")
     verify_publication(compiler, "compile")
     verify_publication(compiler, "interpret")

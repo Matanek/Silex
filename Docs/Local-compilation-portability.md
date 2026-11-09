@@ -55,6 +55,25 @@ Windows ARM64 explicitly selects `aarch64-windows` when its Zig bootstrap tool
 runs through X64 compatibility; the tested CLI, unit binary and generated native
 programs remain ARM64. No cache archive is uploaded by these guards.
 
+## Observe an interrupted first compilation
+
+The CLI bank clears its previous trace before each command, preserves partial
+stdout/stderr, and reports the sizes of the executable, adjacent Debug object,
+and trace every 15 seconds while a command is pending. With a fresh output path,
+a completed `.silex.o` separates object production from subsequent linkage. After
+success the initial compile reports its full phase timings. A timeout stops only
+the owned compiler process tree; inherited linker output handles cannot leave
+the test waiting indefinitely for captured pipes to close.
+
+`--initial-compile-timeout` changes only the diagnostic observation window for
+the first Debug compile. Other compilation cases keep their 60-second safety
+bound, and all reuse, invalidation, output and storage assertions remain active.
+The Windows ARM64 workflow explicitly permits 300 seconds for that one initial
+observation after an unexplained first-compile timeout. This is not a relaxed
+product latency budget or evidence that the delay comes from the linker.
+Interpret its phase timings before attributing or correcting the cost. Process
+capture/cleanup regressions run through `VerifyCacheProcess.py` on every host.
+
 ## Evidence boundaries
 
 A configured job is not an executed proof. Keep these results distinct for each

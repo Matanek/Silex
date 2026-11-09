@@ -1313,7 +1313,7 @@ jobs:
           if ($managedZigMachine -ne 0x8664) {
             throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"
           }
-          python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows
+          python .github/scripts/verify-local-compilation.py $silex --zig $managedZig --target aarch64-windows --initial-compile-timeout 300
           $shaderMachine = Get-PeMachine $shadercross
           if ($shaderMachine -ne 0x8664) {
             throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"

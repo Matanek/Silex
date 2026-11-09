@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Compilation probes retain partial output and file-phase evidence while
+  waiting, then stop their child processes on timeout. The initial Windows
+  ARM64 diagnostic keeps observation limits separate from latency budgets
+  and preserves reuse and retention assertions.
+
 - Native multi-target validation includes local compilation guards for active
   aliases, Debug/Release reuse, and bounded retention.
 
