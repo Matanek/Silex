@@ -159,3 +159,6 @@ copy follows it through the same class graph mapping as visible fields. The
 reference interpreter models the owned receiver as a class capture. Callback
 layout changes must update optional and aggregate equality, both encoders,
 deep copy and cycle tracing together.
+
+The frontend can first establish [lexical callback confinement](Callback-confinement.md)
+with a finite flow graph. Unproven cases retain the ownership interpreter.

@@ -17,6 +17,7 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
 }
 
 pub const Options = struct {
+    confinement: bool = true,
     payload_tags: bool = true,
     prune_dead_values: bool = true,
     index_frames: bool = true,
@@ -43,6 +44,11 @@ pub fn checkConfigured(allocator: A, program: Ir.Program, trace: ?*CompilationTr
     // No lexical loan can originate in this program. Protocols and object
     // cycles alone do not require callback ownership interpretation.
     if (!any) return null;
+    const confinement = if (options.confinement) try @import("CallbackFlow/Confinement.zig").Graph.init(a, program) else null;
+    if (active_trace) |reporter| if (confinement) |graph| {
+        reporter.metrics.callback_confinement_nodes = graph.heads.items.len;
+        reporter.metrics.callback_confinement_edges = graph.edges.items.len;
+    };
     const predicates = try Refine.program(a, program);
     const looping_blocks = try @import("CallbackFlow/Loops.zig").program(a, program);
     var live_cache = try @import("CallbackFlow/LiveValues.zig").Cache.init(a, program);
@@ -55,6 +61,10 @@ pub fn checkConfigured(allocator: A, program: Ir.Program, trace: ?*CompilationTr
         var partition = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer partition.deinit();
         const owned = partition.allocator();
+        if (confinement) |graph| if (try graph.proven(owned, source)) {
+            if (active_trace) |reporter| reporter.metrics.callback_origins_confined +|= 1;
+            continue;
+        };
         if (@import("CallbackFlow/ClosedRoot.zig").eligible(program, source)) {
             const loans = try @import("CallbackFlow/Domain.zig").loanCapabilities(owned, program, source);
             if (try @import("CallbackFlow/ClosedRoot.zig").proven(owned, program, loans, source)) {

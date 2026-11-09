@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Une preuve de confinement des callbacks suit les valeurs, champs, alias et
+  appels dans un graphe fini avant l’interprétation complète de la propriété.
+  Les cas non prouvés conservent cette interprétation, notamment les factories
+  opaques et les chemins de rétention. L’IR émise et le contrat de capture ne
+  changent pas ; voir `Docs/Callback-confinement.md`.
+
 - L’analyse des callbacks conserve le discriminant des enums avec charge utile
   et sépare leurs contenus dans les branches, sans présumer leur égalité. Les
   finaliseurs d’un receveur inconnu sont limités à sa classe déclarée et à ses

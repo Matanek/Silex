@@ -8,6 +8,12 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Callback confinement follows values, fields, aliases and calls in a finite
+  flow graph before the complete ownership interpretation. Unproven cases
+  retain that interpretation, including opaque factories and retaining paths.
+  Emitted IR and the capture contract remain unchanged; see
+  `Docs/Callback-confinement.md`.
+
 - Callback analysis preserves discriminants and branch payloads for associated
   enums without assuming payload equality. Unknown receivers use finalizers
   only from their declared class and subclasses. Block entries omit dead SSA

@@ -12,6 +12,8 @@ test {
     _ = @import("Sources/CallbackContextTests.zig");
     _ = @import("Sources/CallbackReferenceTests.zig");
     _ = @import("Sources/CallbackClosedRootTests.zig");
+    _ = @import("Sources/CallbackConfinementTests.zig");
+    _ = @import("Sources/CallbackConfinementSourceTests.zig");
     _ = @import("Sources/CallbackLocalTests.zig");
     _ = @import("Sources/CallbackChoiceTests.zig");
     _ = @import("Sources/CallbackReachabilityTests.zig");
