@@ -5,21 +5,34 @@ const Liveness = @import("ResidenceLiveness.zig");
 // This late pass never extends a register lifetime. Only unaddressed stack
 // homes can alias, within one basic block, until either home is overwritten.
 pub fn optimize(allocator: std.mem.Allocator, function: Machine.Function) !Machine.Function {
-    return optimizeConfigured(allocator, function, true, null);
+    return optimizeConfigured(allocator, function, .active, null);
 }
 
-const Counters = struct { definition_queries: usize = 0 };
+const Traversal = enum { all, nonidentity, active };
+const Counters = struct { definition_queries: usize = 0, slot_visits: usize = 0 };
 
 fn defines(counters: ?*Counters, instruction: Machine.Instruction, slot: usize) bool {
     if (counters) |c| c.definition_queries += 1;
     return Liveness.instructionDefines(instruction, slot);
 }
 
-fn optimizeConfigured(allocator: std.mem.Allocator, function: Machine.Function, skip_identities: bool, counters: ?*Counters) !Machine.Function {
+fn assign(aliases: []Machine.Slot, active: *std.DynamicBitSetUnmanaged, slot: usize, source: Machine.Slot) void {
+    aliases[slot] = source;
+    active.setValue(slot, source != slot);
+}
+
+fn invalidate(aliases: []Machine.Slot, active: *std.DynamicBitSetUnmanaged, instruction: Machine.Instruction, slot: usize, counters: ?*Counters) void {
+    if (defines(counters, instruction, slot) or defines(counters, instruction, aliases[slot]))
+        assign(aliases, active, slot, @intCast(slot));
+}
+
+fn optimizeConfigured(allocator: std.mem.Allocator, function: Machine.Function, traversal: Traversal, counters: ?*Counters) !Machine.Function {
     if (function.reuses_slots) return function;
     const aliases = try allocator.alloc(Machine.Slot, function.slot_count);
     defer allocator.free(aliases);
     reset(aliases);
+    var active = try std.DynamicBitSetUnmanaged.initEmpty(allocator, function.slot_count);
+    defer active.deinit(allocator);
     const eligible = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(eligible);
     for (eligible, 0..) |*value, slot| value.* =
@@ -44,7 +57,13 @@ fn optimizeConfigured(allocator: std.mem.Allocator, function: Machine.Function, 
     };
     const instructions = try allocator.dupe(Machine.Instruction, function.instructions);
     for (instructions, 0..) |*instruction, index| {
-        if (heads[index]) reset(aliases);
+        if (heads[index]) {
+            if (traversal == .active) {
+                var slots = active.iterator(.{});
+                while (slots.next()) |slot| aliases[slot] = @intCast(slot);
+            } else reset(aliases);
+            active.unsetAll();
+        }
         // Rewrite only scalar consumers. Aggregate ABI operands retain their
         // contiguous stack layout and all memory/ownership effects stay put.
         switch (instruction.*) {
@@ -62,22 +81,26 @@ fn optimizeConfigured(allocator: std.mem.Allocator, function: Machine.Function, 
         }
         // Entries point directly at their storage source. A source write
         // invalidates every snapshot, while a destination write kills itself.
-        for (aliases, 0..) |*source, slot| {
-            // Resetting an identity cannot change it. Dependent snapshots
-            // still test both their destination and their storage source.
-            if (skip_identities and source.* == slot) continue;
-            if (defines(counters, instruction.*, slot) or
-                defines(counters, instruction.*, source.*)) source.* = @intCast(slot);
+        if (traversal == .active) {
+            var slots = active.iterator(.{});
+            while (slots.next()) |slot| {
+                if (counters) |c| c.slot_visits += 1;
+                invalidate(aliases, &active, instruction.*, slot, counters);
+            }
+        } else for (aliases, 0..) |source, slot| {
+            if (counters) |c| c.slot_visits += 1;
+            if (traversal == .nonidentity and source == slot) continue;
+            invalidate(aliases, &active, instruction.*, slot, counters);
         }
         switch (instruction.*) {
             .copy => |v| if (eligible[v.result] and eligible[v.operand]) {
-                aliases[v.result] = v.operand;
+                assign(aliases, &active, v.result, v.operand);
             },
             .copy_range => |v| if (!overlaps(v.result, v.operand)) {
                 for (0..v.result.width) |leaf| {
                     const target = @as(usize, v.result.start) + leaf;
                     const source = aliases[@as(usize, v.operand.start) + leaf];
-                    if (eligible[target] and eligible[source]) aliases[target] = source;
+                    if (eligible[target] and eligible[source]) assign(aliases, &active, target, source);
                 }
             },
             .aggregate_init => |v| {
@@ -89,7 +112,7 @@ fn optimizeConfigured(allocator: std.mem.Allocator, function: Machine.Function, 
                     for (0..field.width) |leaf| {
                         const target = @as(usize, v.result.start) + offset + leaf;
                         const source = aliases[@as(usize, field.start) + leaf];
-                        if (eligible[target] and eligible[source]) aliases[target] = source;
+                        if (eligible[target] and eligible[source]) assign(aliases, &active, target, source);
                     }
                     offset += field.width;
                 };
@@ -201,12 +224,17 @@ test "stack forwarding identity pruning preserves source writes ranges and block
     };
     var before: Counters = .{};
     var after: Counters = .{};
-    const expected = try optimizeConfigured(a, original, false, &before);
-    const actual = try optimizeConfigured(a, original, true, &after);
+    var filtered: Counters = .{};
+    const expected = try optimizeConfigured(a, original, .all, &before);
+    const previous = try optimizeConfigured(a, original, .nonidentity, &filtered);
+    const actual = try optimizeConfigured(a, original, .active, &after);
     const expected_json = try std.json.Stringify.valueAlloc(a, expected, .{});
     const actual_json = try std.json.Stringify.valueAlloc(a, actual, .{});
     try std.testing.expectEqualStrings(expected_json, actual_json);
+    try std.testing.expectEqualStrings(expected_json, try std.json.Stringify.valueAlloc(a, previous, .{}));
     try std.testing.expect(after.definition_queries * 100 < before.definition_queries);
+    try std.testing.expectEqual(filtered.definition_queries, after.definition_queries);
+    try std.testing.expect(after.slot_visits * 100 < filtered.slot_visits);
     try std.testing.expectEqual(@as(Machine.Slot, 3), actual.instructions[4].binary.left);
     try std.testing.expectEqual(@as(Machine.Slot, 11), actual.instructions[11].binary.left);
 }

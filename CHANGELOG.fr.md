@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La génération native suit uniquement les alias de stockage actifs pendant
+  le nettoyage des copies. Elle évite les parcours répétés des autres stockages
+  et conserve les mêmes invalidations, sans ajouter de cache persistant.
+
 - Le transfert du programme vers les backends copie directement les descripteurs
   typés, sans sérialisation JSON intermédiaire. Les métadonnées et leur durée de
   vie sont conservées, avec moins de conversion pendant la compilation.

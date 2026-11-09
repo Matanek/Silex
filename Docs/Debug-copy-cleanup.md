@@ -103,3 +103,21 @@ Do not change compiler identities concurrently with a shared-cache language
 campaign: generation cleanup can remove a test object while it is linking or
 running. An initial overlapping campaign was discarded, and its affected
 coordinate regression and complete suite pass on sequential replay.
+
+
+## Sparse stack alias tracking
+
+`StackCopyForwarding` maintains a temporary bit set of exactly the non-identity
+alias entries. Scalar and aggregate transfers update this membership alongside
+the existing direct storage mapping. Invalidation visits the active entries,
+testing the same destination and source definitions. Block boundaries reset
+only those entries; all other mappings already point to their own storage.
+The bit set is released after each function and creates no persistent cache.
+
+Internal oracles retain both full scans and identity filtering. Tests compare
+complete machine functions, source writes, overlapping ranges, addressed or
+register homes and block joins. The sparse fixture performs the same definition
+queries as identity filtering while visiting over one hundred times fewer slots.
+The shared machine cleanup serves ARM64 and X64 Debug, and the existing Release
+cleanup path; no ABI, emission rule or cache identity policy changes. Timing and
+cache-retention evidence must be measured separately on the host configuration.

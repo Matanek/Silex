@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native copy cleanup tracks only active storage aliases, avoiding repeated
+  scans of other slots while retaining the same invalidations. This temporary
+  tracking adds no persistent cache.
+
 - Program transfer to compilation backends copies typed descriptors directly,
   without intermediate JSON serialization. Metadata and ownership lifetimes
   are preserved while compilation avoids the text conversion.
