@@ -2,6 +2,7 @@ use Module.AggregateCallCoordinates
 use Module.InteropSignedStorage
 use Module.DebugCopies
 use Module.BorrowedStringArguments
+use Module.FloatCollectionArguments
 
 func total(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int, i:int, j:int) int {
     return a + b + c + d + e + f + g + h + i + j
@@ -733,6 +734,7 @@ test "native bound callbacks own and release their receiver graph" {
 func main() {
     // Keep this entry interpretable; raw C stores are exercised by the native test below.
     DebugCopies.floating_exercise()
+    FloatCollectionArguments.exercise()
     AggregateCallCoordinates.exercise()
     assert(DebugCopies.exercise(5) == 48)
     assert(DebugCopies.exercise(9) == 64)
@@ -869,4 +871,8 @@ test "native Debug copy cleanup preserves value snapshots" {
 
 test "native borrowed string arguments keep their owned storage" {
     BorrowedStringArguments.exercise()
+}
+
+test "native floating collection reads preserve wide values before conversion" {
+    FloatCollectionArguments.exercise()
 }

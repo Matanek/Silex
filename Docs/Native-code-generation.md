@@ -394,6 +394,13 @@ bits. This rule applies to Darwin, Linux and Windows ARM64 emission; X64 does
 not use this cache. The machine regression covers float32/float64 constants,
 negation and arithmetic independently of register placement.
 
+ARM64 collection loads distinguish compact float32 storage from wide eight-byte
+cells. A resident scalar or odd tail in wide storage loads the complete cell,
+matching the paired load path; its floating-point register does not imply a
+32-bit payload. Machine regressions cover scalar and three-leaf float64 reads,
+and `FloatCollectionArguments.sx` exercises a wide collection value converted
+and passed to a method through a temporary aggregate on every native target.
+
 `zig build test-debug-copies -Demit-native-probes=true` writes six independent Linux/Windows ARM64
 probes under `.zig-cache/native-scalar-cache`, using the production object writers
 and linker. The native portability workflow

@@ -20,6 +20,7 @@ du compilateur.
 
 ### Changements
 
+- Sur ARM64, les lectures natives de tableaux `float64` conservent leurs 64 bits lorsqu’un élément isolé ou la fin impaire d’un agrégat réside dans un registre flottant. Les coordonnées construites dans une boucle puis passées à une méthode ne deviennent plus nulles avant leur conversion en `float`.
 - Un consommateur placé sous le dossier de sa dépendance conserve ses modules frères avec un chemin d’entrée absolu ou relatif. La découverte du compilateur et de l’éditeur exclut uniquement les dépendances descendantes, sans masquer le consommateur sous une dépendance parente.
 - Sous Windows ARM64, une dépendance déclarant le runtime C++ conserve son démarrage CRT complet ; la liaison ne combine plus ce dernier avec le démarrage UCRT autonome et ses symboles TLS.
 - Les échecs de liaison native indiquent aussi le statut du processus et sa sortie standard, afin de distinguer une erreur de symboles d’un arrêt du linker.

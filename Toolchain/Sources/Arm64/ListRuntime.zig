@@ -1113,7 +1113,9 @@ fn emitResidentFloatLoads(
             continue;
         };
         const destination: A64.Register = @enumFromInt(function.float_register_slots[slot].?);
-        try words.append(allocator, A64.loadFloat32(destination, base, @intCast(leaf * Machine.slot_size)));
+        // Wide cells may contain float64. Preserve the complete cell, as the
+        // paired path does; compact float32 storage is handled above.
+        try words.append(allocator, A64.loadVector64(destination, base, @intCast(leaf * Machine.slot_size)));
     }
     return leaf;
 }

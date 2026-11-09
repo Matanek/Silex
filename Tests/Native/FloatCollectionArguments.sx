@@ -1,0 +1,20 @@
+struct Point {
+    let x:float
+    let y:float
+    init(x:float, y:float) { self.x = x; self.y = y }
+}
+
+class Receiver {
+    func press(point:Point) bool { assert(point.y >= 60.0); return true }
+    func release(point:Point) bool { assert(point.y >= 60.0); return true }
+}
+
+public func exercise() {
+    var receiver = Receiver()
+    for y in [60.0, 100.0, 60.0] {
+        receiver.press(Point(80.0, y as float))
+        receiver.release(Point(80.0, y as float))
+    }
+}
+
+func main() { exercise() }

@@ -18,6 +18,7 @@ features and versions; these are not included in the compiler binary.
 
 ### Changes
 
+- On ARM64, native `float64` array reads retain all 64 bits when a scalar element or an aggregate’s odd tail resides in a floating-point register. Coordinates built in a loop and passed to a method no longer become zero before conversion to `float`.
 - Consumers located under their dependency directory retain sibling modules with absolute or relative entry paths. Compiler and editor discovery exclude only descendant dependency roots, without hiding a consumer below an ancestor dependency.
 - On Windows ARM64, dependencies declaring the C++ runtime retain its full CRT startup; linking no longer combines it with the standalone UCRT startup and TLS symbols.
 - Native link failures also report the process termination status and standard output, distinguishing symbol errors from a linker crash.

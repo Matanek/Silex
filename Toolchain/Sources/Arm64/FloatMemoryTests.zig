@@ -480,6 +480,54 @@ test "wide float32 collection loads insert both resident SIMD lanes" {
     try std.testing.expectEqual(floatBits(10, false), result.value);
 }
 
+test "Debug copy cleanup preserves float64 scalar and odd resident collection loads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const scalar = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .collection_load = .{ .result = .{ .start = 3, .width = 1 }, .collection = .{ .start = 0, .width = 2, .aggregate = true }, .index = 2, .count = 0, .dynamic = true, .view = true, .checked = false, .element_stride = 8, .header = 0, .tail = 0 } },
+        .{ .return_value = .{ .start = 3, .width = 1 } },
+    };
+    const triple = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .collection_load = .{ .result = .{ .start = 3, .width = 3, .aggregate = true }, .collection = .{ .start = 0, .width = 2, .aggregate = true }, .index = 2, .count = 0, .dynamic = true, .view = true, .checked = false, .element_stride = 24, .header = 0, .tail = 0 } },
+        .{ .binary = .{ .result = 6, .left = 3, .right = 4, .operator = .add, .type = .float64 } },
+        .{ .binary = .{ .result = 7, .left = 6, .right = 5, .operator = .add, .type = .float64 } },
+        .{ .return_value = .{ .start = 7, .width = 1 } },
+    };
+    const residences = [_]?u5{ null, null, null, 16, 17, 18, 19, 20 };
+    for ([_]bool{ false, true }) |aggregate| {
+        const count: Machine.Slot = if (aggregate) 8 else 4;
+        const function: Machine.Function = .{
+            .name = "resident_float64_collection",
+            .parameter_count = 2,
+            .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+            .return_type = .float64,
+            .return_width = 1,
+            .slot_count = count,
+            .frame_size = try Machine.frameSize(count),
+            .float_register_slots = residences[0..count],
+            .instructions = if (aggregate) &triple else &scalar,
+        };
+        const program: Machine.Program = .{ .functions = &.{function}, .strings = &.{""} };
+        for ([_]Encoder.Platform{ .darwin, .linux, .windows }) |platform| {
+            const image = try switch (platform) {
+                .darwin => Encoder.encode(allocator, program, .none),
+                .linux => Encoder.encodeLinux(allocator, program, .none),
+                .windows => Encoder.encodeWindows(allocator, program, .none),
+            };
+            try std.testing.expect(image.code.len != 0);
+        }
+        if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
+            var cells = [_]u64{ @intCast(floatBits(2, true)), @intCast(floatBits(3, true)), @intCast(floatBits(5, true)) };
+            const result = try Runner.invoke(allocator, program, 0, &.{ @intCast(@intFromPtr(&cells)), 1 });
+            try std.testing.expectEqual(Machine.Status.success, result.status);
+            try std.testing.expectEqual(floatBits(if (aggregate) 10 else 2, true), result.value);
+        }
+    }
+}
+
 test "Debug copy cleanup scalar cache observes floating writes to reused stack slots" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
